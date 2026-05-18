@@ -1,7 +1,11 @@
 # Glacier.DocTree
 
+[![DEV.to Story](https://img.shields.io/badge/DEV.to-Story-0a0a0a?style=for-the-badge&logo=devto&logoColor=white)](https://dev.to/iancowley/why-naive-rag-is-dead-i-built-a-zero-dependency-c-semantic-tree-parser-2ph8)
 [![NuGet Version](https://img.shields.io/nuget/v/Glacier.DocTree.svg?style=flat-square)](https://www.nuget.org/packages/Glacier.DocTree/)
 [![NuGet Downloads](https://img.shields.io/nuget/dt/Glacier.DocTree.svg?style=flat-square)](https://www.nuget.org/packages/Glacier.DocTree/)
+
+> 📖 **Read the Deep-Dive**: **[Why naive RAG is dead: I built a zero-dependency C# semantic tree parser.](https://dev.to/iancowley/why-naive-rag-is-dead-i-built-a-zero-dependency-c-semantic-tree-parser-2ph8)**
+
 
 **Glacier.DocTree** is a blazing-fast, zero-dependency Markdown parser and semantic chunking engine for .NET 10. Built explicitly for Retrieval-Augmented Generation (RAG), AI search context indexing, and semantic document analysis, it parses flat Markdown text into a nested, structural **Document Object Tree** (`DocNode`).
 
