@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="samples/Glacier.DocTree.Demo/Glacier.DocTree.Demo.csproj" Id="36b6b490-3423-4a15-b564-5fc5e53d5b36" />
+  <Project Path="src/Glacier.DocTree/Glacier.DocTree.csproj" />
+</Solution>
