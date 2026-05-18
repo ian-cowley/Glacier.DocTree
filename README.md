@@ -110,6 +110,51 @@ curl -H 'X-API-Key: secret_key' https://api.example.com/v1/data
 
 ---
 
+## Interactive Demo Output
+
+When running the bundled demo project (`samples/Glacier.DocTree.Demo`), you will see the hierarchical tree visualization and RAG query context extraction in action:
+
+```text
+==========================================
+ Glacier.DocTree | Semantic Parser Engine
+==========================================
+
+[1] Parsing Markdown into Semantic Tree...
+
+[2] Visualizing the Document Structure:
+└─ [Root] Document Root
+  └─ [Header1] Glacier Enterprise API
+    └─ [Paragraph] Welcome to the Glacier API. This docu...
+    └─ [Header2] Authentication
+      └─ [Paragraph] All requests to the API must be crypt...
+      └─ [Header3] OAuth 2.0
+        └─ [Paragraph] To authenticate via OAuth2, you must ...
+        └─ [CodeBlock] json {    "Authorization": "Bearer...
+    └─ [Header2] Usage Policies
+      └─ [Paragraph] Please adhere to the following usage ...
+      └─ [Header3] Rate Limits
+        └─ [Paragraph] Free tier users are limited to 100 re...
+      └─ [Header3] Acceptable Use
+        └─ [Paragraph] Do not use the API to train competing...
+
+[3] Simulating Agent Query: 'Extract Rate Limits context'
+
+--- SEMANTIC CONTEXT ---
+LOCATION: Document Root > Glacier Enterprise API > Usage Policies > Rate Limits
+--- BEGIN TEXT ---
+Rate Limits
+Free tier users are limited to 100 requests per minute.
+Enterprise users have unlimited access.
+If you exceed the limit, you will receive an HTTP 429 status code.
+--- END TEXT ---
+
+==========================================
+ DOCTREE ENGINE READY FOR AGENT DEVKIT
+==========================================
+```
+
+---
+
 ## Architecture Overview
 
 1.  **Semantic Parser Strategy**: Walks text lines sequentially, dynamically tracking open headers using a back-referencing active parent index stack.
