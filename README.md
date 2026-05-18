@@ -101,9 +101,9 @@ LOCATION: API Documentation > Authentication > Header Validation
 --- BEGIN TEXT ---
 Header Validation
 Provide the API key in the X-API-Key header:
-```bash
+
 curl -H 'X-API-Key: secret_key' https://api.example.com/v1/data
-```
+
 --- END TEXT ---
 */
 ```
