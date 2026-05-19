@@ -9,6 +9,7 @@ namespace Glacier.DocTree.Core
     {
         private readonly string _directoryPath;
         private readonly string _nodeId;
+        private readonly object _loadLock = new();
         private bool _isLoaded;
         private NodeType _type;
         private string _content = string.Empty;
@@ -28,35 +29,40 @@ namespace Glacier.DocTree.Core
         {
             if (_isLoaded) return;
 
-            string filePath = Path.Combine(_directoryPath, $"{_nodeId}.json");
-            if (!File.Exists(filePath))
+            lock (_loadLock)
             {
-                throw new FileNotFoundException($"Serialized node file not found: {filePath}");
-            }
+                if (_isLoaded) return;
 
-            string json = File.ReadAllText(filePath);
-            var dto = JsonSerializer.Deserialize<SerializedDocNodeDto>(json);
-            if (dto != null)
-            {
-                _type = dto.Type;
-                _content = dto.Content ?? string.Empty;
-                _metadata = dto.Metadata ?? new Dictionary<string, string>();
-                _children = new List<DocNode>();
-
-                if (dto.ChildrenIds != null)
+                string filePath = Path.Combine(_directoryPath, $"{_nodeId}.json");
+                if (!File.Exists(filePath))
                 {
-                    foreach (var childId in dto.ChildrenIds)
+                    throw new FileNotFoundException($"Serialized node file not found: {filePath}");
+                }
+
+                string json = File.ReadAllText(filePath);
+                var dto = JsonSerializer.Deserialize<SerializedDocNodeDto>(json);
+                if (dto != null)
+                {
+                    _type = dto.Type;
+                    _content = dto.Content ?? string.Empty;
+                    _metadata = dto.Metadata ?? new Dictionary<string, string>();
+                    _children = new List<DocNode>();
+
+                    if (dto.ChildrenIds != null)
                     {
-                        var child = new LazyDocNode(_directoryPath, childId)
+                        foreach (var childId in dto.ChildrenIds)
                         {
-                            Parent = this
-                        };
-                        _children.Add(child);
+                            var child = new LazyDocNode(_directoryPath, childId)
+                            {
+                                Parent = this
+                            };
+                            _children.Add(child);
+                        }
                     }
                 }
-            }
 
-            _isLoaded = true;
+                _isLoaded = true;
+            }
         }
 
         public override NodeType Type
