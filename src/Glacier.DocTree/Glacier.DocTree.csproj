@@ -1,9 +1,18 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- NuGet Packaging Properties -->
+    <Version>1.0.1</Version>
+    <PackageId>Glacier.DocTree</PackageId>
+    <Authors>Ian Cowley</Authors>
+    <Company>Glacier</Company>
+    <Description>A blazing fast, zero-dependency Markdown parser and semantic document tree representation optimized for AI and LLM context extraction.</Description>
+    <PackageTags>markdown parser doctree semantic-tree llm context-bundler</PackageTags>
+    <RepositoryUrl>https://github.com/ian-cowley/Glacier.DocTree</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 
 </Project>

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -23,14 +23,14 @@ namespace Glacier.DocTree.Core
     /// </summary>
     public class DocNode
     {
-        public NodeType Type { get; set; }
-        public string Content { get; set; } = string.Empty;
-        public Dictionary<string, string> Metadata { get; set; } = new();
+        public virtual NodeType Type { get; set; }
+        public virtual string Content { get; set; } = string.Empty;
+        public virtual Dictionary<string, string> Metadata { get; set; } = new();
 
-        public DocNode? Parent { get; set; }
-        public List<DocNode> Children { get; set; } = new();
+        public virtual DocNode? Parent { get; set; }
+        public virtual List<DocNode> Children { get; set; } = new();
 
-        public void AddChild(DocNode child)
+        public virtual void AddChild(DocNode child)
         {
             child.Parent = this;
             Children.Add(child);
