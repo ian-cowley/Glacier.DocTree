@@ -76,5 +76,30 @@ namespace Glacier.DocTree.Core
             string json = JsonSerializer.Serialize(dto, options);
             File.WriteAllText(filePath, json);
         }
+
+        /// <summary>
+        /// Serializes a DocNode tree into a single contiguous memory-mapped binary (.gdoc) format.
+        /// </summary>
+        public static void SerializeBinary(DocNode root, string filePath)
+        {
+            Binary.GdocWriter.Write(root, filePath);
+        }
+
+        /// <summary>
+        /// Opens a memory-mapped .gdoc file for zero-copy binary reading and navigation.
+        /// </summary>
+        public static Binary.GdocReader OpenBinary(string filePath)
+        {
+            return new Binary.GdocReader(filePath);
+        }
+
+        /// <summary>
+        /// Deserializes a DocNode tree from a .gdoc binary file into an in-memory DocNode AST.
+        /// </summary>
+        public static DocNode DeserializeBinary(string filePath)
+        {
+            using var reader = new Binary.GdocReader(filePath);
+            return reader.ToDocNodeTree();
+        }
     }
 }
