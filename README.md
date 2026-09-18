@@ -1,8 +1,12 @@
 # Glacier.DocTree
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-purple.svg)](https://dotnet.microsoft.com/)
+[![Native AOT](https://img.shields.io/badge/Native%20AOT-Ready-brightgreen.svg)](https://learn.microsoft.com/dotnet/core/deploying/native-aot/)
+[![NuGet Version](https://img.shields.io/nuget/v/Glacier.DocTree.svg)](https://www.nuget.org/packages/Glacier.DocTree/)
+[![NuGet Downloads](https://img.shields.io/nuget/dt/Glacier.DocTree.svg)](https://www.nuget.org/packages/Glacier.DocTree/)
+[![Ecosystem](https://img.shields.io/badge/Glacier-Ecosystem-blue)](https://github.com/ian-cowley)
 [![DEV.to Story](https://img.shields.io/badge/DEV.to-Story-0a0a0a?style=for-the-badge&logo=devto&logoColor=white)](https://dev.to/iancowley/why-naive-rag-is-dead-i-built-a-zero-dependency-c-semantic-tree-parser-2ph8)
-[![NuGet Version](https://img.shields.io/nuget/v/Glacier.DocTree.svg?style=flat-square)](https://www.nuget.org/packages/Glacier.DocTree/)
-[![NuGet Downloads](https://img.shields.io/nuget/dt/Glacier.DocTree.svg?style=flat-square)](https://www.nuget.org/packages/Glacier.DocTree/)
 
 > 📖 **Read the Deep-Dive**: **[Why naive RAG is dead: I built a zero-dependency C# semantic tree parser.](https://dev.to/iancowley/why-naive-rag-is-dead-i-built-a-zero-dependency-c-semantic-tree-parser-2ph8)**
 
