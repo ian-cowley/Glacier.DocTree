@@ -175,6 +175,12 @@ If you exceed the limit, you will receive an HTTP 429 status code.
 
 We welcome community contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for local setups, branch models, and PR checklist details.
 
+## 🆕 What's New in v1.0.4
+
+- **Memory-mapped binary `.gdoc` persistence format** — zero-copy structured document I/O enabling instant load of large document trees without deserialization overhead.
+- **Zero-alloc `SpanMarkdownParser`** — implemented as a `ref struct` with no string allocations during the full markdown parsing pass.
+- **10 tests** passing (100 %).
+
 ## Credits
 
 Developed by **Ian Cowley** and **Antigravity (Google DeepMind)**.
