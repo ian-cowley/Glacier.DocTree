@@ -6,14 +6,18 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- NuGet Packaging Properties -->
-    <Version>1.0.4</Version>
+    <Version>1.0.5</Version>
     <PackageId>Glacier.DocTree</PackageId>
     <Authors>Ian Cowley</Authors>
     <Company>Glacier</Company>
-    <Description>A blazing fast, zero-dependency Markdown parser and semantic document tree representation optimized for AI and LLM context extraction.</Description>
-    <PackageTags>markdown parser doctree semantic-tree llm context-bundler</PackageTags>
+    <Description>A blazing fast Markdown parser and semantic document tree representation optimized for AI and LLM context extraction, featuring native Glacier.Storage .gdoc binary persistence.</Description>
+    <PackageTags>markdown parser doctree semantic-tree llm context-bundler gdoc storage</PackageTags>
     <RepositoryUrl>https://github.com/ian-cowley/Glacier.DocTree</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Glacier.Storage" Version="1.0.0" />
+  </ItemGroup>
 
 </Project>

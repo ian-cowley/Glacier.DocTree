@@ -244,5 +244,32 @@ Sub paragraph";
                 using var reader = new GdocReader(gdocPath);
             });
         }
+
+        [Fact]
+        public void GlacierStorageDocExtensions_RoundTrip_PreservesTreeHierarchy()
+        {
+            var root = new DocNode { Type = NodeType.Root, Content = "Root Document" };
+            var h1 = new DocNode { Type = NodeType.Header1, Content = "Architecture" };
+            var p1 = new DocNode { Type = NodeType.Paragraph, Content = "Glacier.Storage binary format." };
+            h1.AddChild(p1);
+            root.AddChild(h1);
+
+            byte[] gdocBytes = GlacierStorageDocExtensions.ToGdocBytes(root);
+            Assert.NotNull(gdocBytes);
+            Assert.True(gdocBytes.Length > 64);
+            // Verify magic "GDOC" = 0x47, 0x44, 0x4F, 0x43
+            Assert.Equal((byte)'G', gdocBytes[0]);
+            Assert.Equal((byte)'D', gdocBytes[1]);
+            Assert.Equal((byte)'O', gdocBytes[2]);
+            Assert.Equal((byte)'C', gdocBytes[3]);
+
+            var loaded = GlacierStorageDocExtensions.LoadGdoc(gdocBytes);
+            Assert.NotNull(loaded);
+            Assert.Equal("Root Document", loaded.Content);
+            Assert.Single(loaded.Children);
+            Assert.Equal("Architecture", loaded.Children[0].Content);
+            Assert.Single(loaded.Children[0].Children);
+            Assert.Equal("Glacier.Storage binary format.", loaded.Children[0].Children[0].Content);
+        }
     }
 }
