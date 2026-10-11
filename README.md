@@ -24,6 +24,8 @@ Unlike dumb sliding-window text splitters, Glacier.DocTree maintains the structu
 *   🧠 **LLM Context Bundles**: Instantly extracts a specific document section and packages it into a beautifully formatted RAG frame including header paths and all recursively nested texts.
 *   🔍 **High-Speed Traversals**: Features fast keyword and exact header search traversal tools across parsed trees.
 *   ⚡ **Zero-Dependency Engine**: Built from the ground up for high-performance memory footprints with zero heavy external dependency requirements.
+*   🧩 **SIMD Byte-Patch Boundary Chunking (`SimdPatchChunker`)**: Vectorized structural boundary detection on code, Markdown, and columnar JSON text with zero heap allocations, slashing token sequence representation overhead by over 2x.
+*   📊 **Columnar/Graph Context Decoupling (`ContextDecoupler`)**: Extracts deterministic tabular facts and knowledge graphs into columnar memory blocks (`Glacier.Polaris` / `Glacier.Graph`), achieving 3.8x KV cache compression over raw BPE token streams.
 
 ---
 

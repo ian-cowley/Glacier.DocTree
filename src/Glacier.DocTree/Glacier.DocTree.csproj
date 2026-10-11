@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- NuGet Packaging Properties -->
-    <Version>1.0.5</Version>
+    <Version>1.1.0</Version>
     <PackageId>Glacier.DocTree</PackageId>
     <Authors>Ian Cowley</Authors>
     <Company>Glacier</Company>
@@ -18,6 +18,20 @@
 
   <ItemGroup>
     <PackageReference Include="Glacier.Storage" Version="1.0.1" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\..\..\Glacier.Polaris\src\Glacier.Polaris\Glacier.Polaris.csproj')">
+    <ProjectReference Include="..\..\..\Glacier.Polaris\src\Glacier.Polaris\Glacier.Polaris.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('..\..\..\Glacier.Polaris\src\Glacier.Polaris\Glacier.Polaris.csproj')">
+    <PackageReference Include="Glacier.Polaris" Version="1.0.20" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\..\..\Glacier.Graph\src\Glacier.Graph\Glacier.Graph.csproj')">
+    <ProjectReference Include="..\..\..\Glacier.Graph\src\Glacier.Graph\Glacier.Graph.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('..\..\..\Glacier.Graph\src\Glacier.Graph\Glacier.Graph.csproj')">
+    <PackageReference Include="Glacier.Graph" Version="1.0.4" />
   </ItemGroup>
 
 </Project>
