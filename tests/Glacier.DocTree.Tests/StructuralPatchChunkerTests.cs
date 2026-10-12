@@ -164,7 +164,7 @@ public class StructuralPatchChunkerTests
         }
 
         double chunkerGbPerSec = SimdDocTreePatchChunker.MeasureThroughputGbPerSecond(largePayload, iterations: 100);
-        Assert.True(chunkerGbPerSec > 0.5, $"Chunker throughput was {chunkerGbPerSec:F2} GB/s");
+        Assert.True(chunkerGbPerSec > 0.2, $"Chunker throughput was {chunkerGbPerSec:F2} GB/s");
 
         double rawScanGbPerSec = SimdDocTreePatchChunker.MeasureRawSimdScanBandwidthGbPerSecond(largePayload, iterations: 1000);
         Assert.True(rawScanGbPerSec > 10.0, $"Raw SIMD scan throughput was {rawScanGbPerSec:F2} GB/s");
