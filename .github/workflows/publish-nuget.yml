@@ -44,8 +44,9 @@ jobs:
             done
             echo "  $pkg $ver is available."
           }
-          wait_for_nuget Glacier.Tensor 1.0.7
-          wait_for_nuget Glacier.Inference 1.2.2
+          wait_for_nuget Glacier.Polaris 1.0.20
+          wait_for_nuget Glacier.Storage 1.0.1
+          wait_for_nuget Glacier.Graph 1.0.5
 
       - name: Restore dependencies
         run: dotnet restore
