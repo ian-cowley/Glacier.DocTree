@@ -1,3 +1,5 @@
+![Glacier.DocTree Banner](assets/banner.jpg)
+
 # Glacier.DocTree
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -14,6 +16,10 @@
 **Glacier.DocTree** is a blazing-fast, zero-dependency Markdown parser and semantic chunking engine for .NET 10. Built explicitly for Retrieval-Augmented Generation (RAG), AI search context indexing, and semantic document analysis, it parses flat Markdown text into a nested, structural **Document Object Tree** (`DocNode`).
 
 Unlike dumb sliding-window text splitters, Glacier.DocTree maintains the structural parent-child relationships between headers (`H1` to `H6`), paragraphs, code blocks, and list items. This ensures LLMs are supplied with absolute context, correct headers, and fully formed semantic blocks.
+
+<p align="center">
+  <img src="assets/architecture.jpg" alt="Glacier.DocTree Architecture Blueprint" width="100%" />
+</p>
 
 ---
 
