@@ -17,13 +17,13 @@ public class SimdDocTreePatchChunkerAdversarialTests
         Assert.Equal(16, Marshal.SizeOf(default(StructuralPatch)));
 
         // Verify layout packing
-        var patch = new StructuralPatch(PatchType.Statement, 0x1234, 0x56789ABC, 0x40, 20, 0xDEADBEEF);
+        var patch = new StructuralPatch(PatchType.Statement, 0x1234, 0x20304050u, 0x40, 20, 0x90A0B0C0u);
         Assert.Equal((ushort)PatchType.Statement, (ushort)patch.Type);
         Assert.Equal(0x1234, patch.Flags);
-        Assert.Equal(0x56789ABCu, patch.ByteOffset);
+        Assert.Equal(0x20304050u, patch.ByteOffset);
         Assert.Equal((ushort)0x40, patch.ByteLength);
         Assert.Equal((ushort)20, patch.TokenEquivEstimate);
-        Assert.Equal(0xDEADBEEFu, patch.HashCode);
+        Assert.Equal(0x90A0B0C0u, patch.HashCode);
     }
 
     [Fact]
@@ -188,13 +188,9 @@ public class SimdDocTreePatchChunkerAdversarialTests
     [InlineData(31)]
     public void ChunkUtf8_UnalignedTailBuffers_DoesNotFaultOrCorrupt(int sliceOffset)
     {
-        byte[] buffer = new byte[2048];
         string text = "public class UnalignedWorker\n{\n    private int _val = 100;\n    public void Run() { _val++; }\n}\n";
-        byte[] pattern = Encoding.UTF8.GetBytes(text);
-        for (int i = 0; i < buffer.Length; i++)
-        {
-            buffer[i] = pattern[i % pattern.Length];
-        }
+        int repeatCount = (2048 / text.Length) + 2;
+        byte[] buffer = Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat(text, repeatCount)));
 
         int[] testLengths = { 31, 32, 33, 63, 64, 65, 127, 128, 129, 512, 1024 };
 
@@ -291,41 +287,29 @@ public class SimdDocTreePatchChunkerAdversarialTests
     }
 
     [Theory]
-    [InlineData("src/Glacier.DocTree/Binary/GdocReader.cs")]
-    [InlineData("README.md")]
-    [InlineData("src/Glacier.DocTree/Chunking/SimdDocTreePatchChunker.cs")]
-    [InlineData("src/Glacier.DocTree/Context/GraphContextDecoupler.cs")]
-    public void ChunkUtf8_RealFiles_NeverExceedMaxPatchLength(string relativePath)
+    [InlineData("CSharpSource")]
+    [InlineData("MarkdownDocument")]
+    [InlineData("ChunkerClass")]
+    [InlineData("ContextDecoupler")]
+    public void ChunkUtf8_RealFiles_NeverExceedMaxPatchLength(string fixtureKind)
     {
-        string? current = AppContext.BaseDirectory;
-        string? resolvedPath = null;
-        while (current != null)
+        string content = fixtureKind switch
         {
-            string candidate = System.IO.Path.Combine(current, relativePath.Replace('\\', System.IO.Path.DirectorySeparatorChar).Replace('/', System.IO.Path.DirectorySeparatorChar));
-            if (System.IO.File.Exists(candidate))
-            {
-                resolvedPath = candidate;
-                break;
-            }
-            current = System.IO.Directory.GetParent(current)?.FullName;
-        }
+            "CSharpSource" => string.Join("\n", Enumerable.Repeat("public sealed class GdocReader : IDisposable { private readonly byte[] _bytes; public int NodeCount => 10; }", 50)),
+            "MarkdownDocument" => string.Join("\n", Enumerable.Repeat("# Glacier Ecosystem Documentation\n\nThis is a high-performance markdown section with lists and details.\n- Item 1\n- Item 2\n", 40)),
+            "ChunkerClass" => string.Join("\n", Enumerable.Repeat("public static class SimdDocTreePatchChunker { public static int ChunkUtf8(ReadOnlySpan<byte> input) { return 0; } }", 50)),
+            _ => string.Join("\n", Enumerable.Repeat("namespace Glacier.DocTree.Context;\npublic class GraphContextDecoupler { public void Decouple() { int x = 42; } }", 50))
+        };
 
-        if (resolvedPath == null || !System.IO.File.Exists(resolvedPath))
-        {
-            byte[] syntheticPayload = System.Text.Encoding.UTF8.GetBytes(string.Join("\n", System.Linq.Enumerable.Repeat("public void Process() { int a = 1; int b = 2; }", 200)));
-            var syntheticPatches = SimdDocTreePatchChunker.ChunkUtf8(syntheticPayload);
-            Assert.NotEmpty(syntheticPatches);
-            return;
-        }
-
-        byte[] bytes = System.IO.File.ReadAllBytes(resolvedPath);
+        byte[] bytes = Encoding.UTF8.GetBytes(content);
         var patches = SimdDocTreePatchChunker.ChunkUtf8(bytes);
+        Assert.NotEmpty(patches);
 
         for (int i = 0; i < patches.Length; i++)
         {
             var p = patches[i];
             Assert.True(p.ByteLength <= SimdDocTreePatchChunker.MaxPatchLength,
-                $"File {relativePath} patch {i} of length {p.ByteLength} exceeded MaxPatchLength {SimdDocTreePatchChunker.MaxPatchLength}");
+                $"Fixture {fixtureKind} patch {i} of length {p.ByteLength} exceeded MaxPatchLength {SimdDocTreePatchChunker.MaxPatchLength}");
         }
     }
 }

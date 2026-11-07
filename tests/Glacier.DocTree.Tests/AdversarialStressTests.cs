@@ -98,7 +98,7 @@ public class AdversarialStressTests : IDisposable
         // Corrupt a byte in the payload (past the 64-byte header)
         byte[] bytes = File.ReadAllBytes(filePath);
         Assert.True(bytes.Length > 70);
-        bytes[68] ^= 0xFF; // Flip bits
+        bytes[68] = (byte)(bytes[68] + 1); // Alter byte to induce CRC mismatch
         File.WriteAllBytes(filePath, bytes);
 
         var ex = Assert.Throws<InvalidDataException>(() =>

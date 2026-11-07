@@ -236,7 +236,7 @@ Sub paragraph";
 
             // Corrupt payload (e.g. in node table or string arena)
             var bytes = File.ReadAllBytes(gdocPath);
-            bytes[bytes.Length - 1] ^= 0xFF;
+            bytes[bytes.Length - 1] = (byte)(bytes[bytes.Length - 1] + 1);
             File.WriteAllBytes(gdocPath, bytes);
 
             Assert.Throws<InvalidDataException>(() =>

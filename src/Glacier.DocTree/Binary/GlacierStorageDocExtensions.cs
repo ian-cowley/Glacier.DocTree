@@ -4,7 +4,7 @@ using System;
 using System.IO;
 using System.Text.Json;
 using Glacier.DocTree.Core;
-using Glacier.Storage.Doc;
+using Glacier.DocTree.GDoc;
 
 /// <summary>
 /// First-party binary AST serialization extensions connecting Glacier.DocTree with Glacier.Storage.Doc (.gdoc).
