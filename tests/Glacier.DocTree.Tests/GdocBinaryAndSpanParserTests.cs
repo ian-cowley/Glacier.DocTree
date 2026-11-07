@@ -271,5 +271,50 @@ Sub paragraph";
             Assert.Single(loaded.Children[0].Children);
             Assert.Equal("Glacier.Storage binary format.", loaded.Children[0].Children[0].Content);
         }
+
+        [Fact]
+        public void GlacierStorageDocExtensions_PreservesDeepHeadersAndMetadata()
+        {
+            var root = new DocNode { Type = NodeType.Root, Content = "Root" };
+            root.Metadata["doc_id"] = "doc-42";
+
+            var h5 = new DocNode { Type = NodeType.Header5, Content = "Deep Header H5" };
+            h5.Metadata["anchor"] = "deep-h5";
+            var list = new DocNode { Type = NodeType.List, Content = "- item 1\n- item 2" };
+            h5.AddChild(list);
+            root.AddChild(h5);
+
+            byte[] bytes = root.ToGdocBytes();
+            var loaded = GlacierStorageDocExtensions.LoadGdoc(bytes);
+
+            Assert.Equal("doc-42", loaded.Metadata["doc_id"]);
+            Assert.Single(loaded.Children);
+            Assert.Equal(NodeType.Header5, loaded.Children[0].Type);
+            Assert.Equal("deep-h5", loaded.Children[0].Metadata["anchor"]);
+            Assert.Single(loaded.Children[0].Children);
+            Assert.Equal(NodeType.List, loaded.Children[0].Children[0].Type);
+        }
+
+        [Fact]
+        public void SpanMarkdownParser_ParsesListsIntoListNodes()
+        {
+            string md = "# Tasks\n- First item\n- Second item\n\n1. Ordered one\n2. Ordered two\n\nClosing paragraph.";
+            var root = SpanMarkdownParser.Parse(md.AsSpan());
+            var h1 = Assert.Single(root.Children);
+            Assert.Equal(3, h1.Children.Count);
+            Assert.Equal(NodeType.List, h1.Children[0].Type);
+            Assert.Contains("First item", h1.Children[0].Content);
+            Assert.Equal(NodeType.List, h1.Children[1].Type);
+            Assert.Contains("Ordered two", h1.Children[1].Content);
+            Assert.Equal(NodeType.Paragraph, h1.Children[2].Type);
+        }
+
+        [Fact]
+        public void GdocReader_TruncatedFile_ThrowsInvalidDataException()
+        {
+            string shortPath = Path.Combine(_tempDir, "short.gdoc");
+            File.WriteAllBytes(shortPath, new byte[16]);
+            Assert.Throws<InvalidDataException>(() => new GdocReader(shortPath));
+        }
     }
 }

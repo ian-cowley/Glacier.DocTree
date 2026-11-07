@@ -4,6 +4,10 @@ using Glacier.DocTree.Core;
 
 namespace Glacier.DocTree.Parser
 {
+    /// <summary>
+    /// Span-tokenized Markdown parser that constructs a hierarchical <see cref="DocNode"/> AST
+    /// covering headings (H1–H6), fenced code blocks, unordered/ordered lists, and paragraphs.
+    /// </summary>
     public static class SpanMarkdownParser
     {
         public static DocNode Parse(ReadOnlySpan<char> markdown)
@@ -38,7 +42,7 @@ namespace Glacier.DocTree.Parser
                     }
                     else
                     {
-                        FlushParagraph(levels, ref currentBlock, blockContent);
+                        FlushBlock(ref currentBlock, blockContent);
                         inCodeBlock = true;
                         currentBlock = new DocNode { Type = NodeType.CodeBlock };
                         GetDeepestActiveHeader(levels).AddChild(currentBlock);
@@ -67,7 +71,7 @@ namespace Glacier.DocTree.Parser
 
                     if (level > 0 && level <= 6 && (trimmed.Length == level || trimmed[level] == ' '))
                     {
-                        FlushParagraph(levels, ref currentBlock, blockContent);
+                        FlushBlock(ref currentBlock, blockContent);
 
                         var headerNode = new DocNode
                         {
@@ -75,7 +79,6 @@ namespace Glacier.DocTree.Parser
                             Content = trimmed[level..].Trim().ToString()
                         };
 
-                        // Find closest parent that is a higher level (lower number)
                         int parentLevel = level - 1;
                         while (parentLevel >= 0 && levels[parentLevel] == null)
                         {
@@ -94,14 +97,42 @@ namespace Glacier.DocTree.Parser
                     }
                 }
 
-                // 3. Empty lines (used to split paragraphs)
+                // 3. Empty lines (used to split blocks)
                 if (trimmed.IsEmpty)
                 {
-                    FlushParagraph(levels, ref currentBlock, blockContent);
+                    FlushBlock(ref currentBlock, blockContent);
                     continue;
                 }
 
-                // 4. Standard Paragraph Text
+                // 4. Unordered / Ordered List items (- , * , + , 1. )
+                if (IsListItem(trimmed))
+                {
+                    if (currentBlock != null && currentBlock.Type != NodeType.List)
+                    {
+                        FlushBlock(ref currentBlock, blockContent);
+                    }
+                    if (currentBlock == null)
+                    {
+                        currentBlock = new DocNode { Type = NodeType.List };
+                        GetDeepestActiveHeader(levels).AddChild(currentBlock);
+                    }
+                    blockContent.Append(line);
+                    blockContent.AppendLine();
+                    continue;
+                }
+
+                // 5. Standard Paragraph Text (or indented continuation of a list item)
+                if (currentBlock != null && currentBlock.Type == NodeType.List)
+                {
+                    if (line.Length > 0 && (line[0] == ' ' || line[0] == '\t'))
+                    {
+                        blockContent.Append(line);
+                        blockContent.AppendLine();
+                        continue;
+                    }
+                    FlushBlock(ref currentBlock, blockContent);
+                }
+
                 if (currentBlock == null)
                 {
                     currentBlock = new DocNode { Type = NodeType.Paragraph };
@@ -111,8 +142,24 @@ namespace Glacier.DocTree.Parser
                 blockContent.AppendLine();
             }
 
-            FlushParagraph(levels, ref currentBlock, blockContent);
+            FlushBlock(ref currentBlock, blockContent);
             return root;
+        }
+
+        private static bool IsListItem(ReadOnlySpan<char> trimmed)
+        {
+            if (trimmed.Length >= 2 && (trimmed[0] == '-' || trimmed[0] == '*' || trimmed[0] == '+') && trimmed[1] == ' ')
+            {
+                return true;
+            }
+
+            int idx = 0;
+            while (idx < trimmed.Length && char.IsAsciiDigit(trimmed[idx]))
+            {
+                idx++;
+            }
+
+            return idx > 0 && idx + 1 < trimmed.Length && (trimmed[idx] == '.' || trimmed[idx] == ')') && trimmed[idx + 1] == ' ';
         }
 
         private static DocNode GetDeepestActiveHeader(DocNode?[] levels)
@@ -124,7 +171,7 @@ namespace Glacier.DocTree.Parser
             return levels[0]!;
         }
 
-        private static void FlushParagraph(DocNode?[] levels, ref DocNode? currentBlock, StringBuilder blockContent)
+        private static void FlushBlock(ref DocNode? currentBlock, StringBuilder blockContent)
         {
             if (currentBlock != null && blockContent.Length > 0)
             {

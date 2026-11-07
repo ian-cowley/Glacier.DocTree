@@ -15,7 +15,7 @@
 > 📖 **Read the Deep-Dive**: **[Why naive RAG is dead: I built a zero-dependency C# semantic tree parser.](https://dev.to/iancowley/why-naive-rag-is-dead-i-built-a-zero-dependency-c-semantic-tree-parser-2ph8)**
 
 
-**Glacier.DocTree** is a blazing-fast, zero-dependency Markdown parser and semantic chunking engine for .NET 10. Built explicitly for Retrieval-Augmented Generation (RAG), AI search context indexing, and semantic document analysis, it parses flat Markdown text into a nested, structural **Document Object Tree** (`DocNode`).
+**Glacier.DocTree** is a high-performance Markdown parser, structural chunking engine, and binary document AST library for .NET 10. Built explicitly for Retrieval-Augmented Generation (RAG), AI search context indexing, and semantic document analysis, it parses flat Markdown text into a nested, structural **Document Object Tree** (`DocNode`) and integrates directly with `Glacier.Storage`, `Glacier.Polaris`, and `Glacier.Graph`.
 
 Unlike dumb sliding-window text splitters, Glacier.DocTree maintains the structural parent-child relationships between headers (`H1` to `H6`), paragraphs, code blocks, and list items. This ensures LLMs are supplied with absolute context, correct headers, and fully formed semantic blocks.
 
@@ -31,7 +31,7 @@ Unlike dumb sliding-window text splitters, Glacier.DocTree maintains the structu
 *   🧭 **Semantic Path Generation**: Recursively traces a node upward to generate semantic breadcrumbs (e.g. `Root > API Manual > Security > OAuth2.0`). Bypasses Naive RAG limitations by giving your AI model complete hierarchy context.
 *   🧠 **LLM Context Bundles**: Instantly extracts a specific document section and packages it into a beautifully formatted RAG frame including header paths and all recursively nested texts.
 *   🔍 **High-Speed Traversals**: Features fast keyword and exact header search traversal tools across parsed trees.
-*   ⚡ **Zero-Dependency Engine**: Built from the ground up for high-performance memory footprints with zero heavy external dependency requirements.
+*   ⚡ **Native AOT & Source-Generated Serialization**: Built with `IsAotCompatible` and source-generated `JsonSerializerContext` for lazy JSON tree persistence alongside zero-copy `.gdoc` memory-mapped reading.
 *   🧩 **SIMD Byte-Patch Boundary Chunking (`SimdPatchChunker`)**: Vectorized structural boundary detection on code, Markdown, and columnar JSON text with zero heap allocations, slashing token sequence representation overhead by over 2x.
 *   📊 **Columnar/Graph Context Decoupling (`ContextDecoupler`)**: Extracts deterministic tabular facts and knowledge graphs into columnar memory blocks (`Glacier.Polaris` / `Glacier.Graph`), achieving 3.8x KV cache compression over raw BPE token streams.
 
@@ -185,11 +185,11 @@ If you exceed the limit, you will receive an HTTP 429 status code.
 
 We welcome community contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for local setups, branch models, and PR checklist details.
 
-## 🆕 What's New in v1.0.4
+## 🆕 What's New in v1.2.0
 
-- **Memory-mapped binary `.gdoc` persistence format** — zero-copy structured document I/O enabling instant load of large document trees without deserialization overhead.
-- **Zero-alloc `SpanMarkdownParser`** — implemented as a `ref struct` with no string allocations during the full markdown parsing pass.
-- **10 tests** passing (100 %).
+- **Hardened .gdoc binary bounds & lossless Glacier.Storage round-trip** — full header/arena bounds validation in GdocReader plus lossless Header4–Header6 and Metadata preservation in GlacierStorageDocExtensions.
+- **Span-tokenized Markdown list & table/graph decoupling** — SpanMarkdownParser parses unordered and ordered lists into NodeType.List, ColumnarContextDecoupler.DecoupleMarkdownTable parses pipe tables into Glacier.Polaris.DataFrame, and GraphContextDecoupler.ExtractDocumentGraph extracts AST hierarchy and link graphs.
+- **Native AOT source-generated JSON serialization** — TreeSerializer and LazyDocNode use source-generated DocTreeJsonContext.
 
 ## Credits
 

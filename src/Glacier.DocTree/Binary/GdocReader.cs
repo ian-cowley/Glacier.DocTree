@@ -17,6 +17,7 @@ namespace Glacier.DocTree.Binary
         private readonly uint _nodeCount;
         private readonly GdocNodeEntry* _nodeTable;
         private readonly byte* _stringArena;
+        private readonly ulong _stringArenaLength;
         private readonly GdocMetadataEntry* _metadataTable;
         private readonly uint _metadataCount;
         private bool _disposed;
@@ -30,52 +31,95 @@ namespace Glacier.DocTree.Binary
                 throw new FileNotFoundException($"The specified .gdoc file was not found: '{gdocFilePath}'");
             }
 
-            _mmf = MemoryMappedFile.CreateFromFile(gdocFilePath, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
-            _accessor = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
-            _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref _basePointer);
-
-            // 1. Validate magic and version
-            uint magic = *(uint*)_basePointer;
-            if (magic != GdocWriter.GdocMagic)
-            {
-                throw new InvalidDataException($"Invalid .gdoc file magic identifier: 0x{magic:X8}");
-            }
-
-            ushort version = *(ushort*)(_basePointer + 4);
-            if (version != GdocWriter.CurrentVersion)
-            {
-                throw new InvalidDataException($"Unsupported .gdoc file version: {version}");
-            }
-
-            // 2. Validate CRC
-            uint expectedCrc = *(uint*)(_basePointer + 58);
             long fileLength = new FileInfo(gdocFilePath).Length;
-            long payloadLength = fileLength - GdocWriter.HeaderSize;
-            if (payloadLength < 0)
+            if (fileLength < GdocWriter.HeaderSize)
             {
                 throw new InvalidDataException("File is too short to be a valid .gdoc file.");
             }
-            if (payloadLength > 0)
+
+            long payloadLength = fileLength - GdocWriter.HeaderSize;
+            if (payloadLength > int.MaxValue)
             {
-                var payloadSpan = new ReadOnlySpan<byte>(_basePointer + GdocWriter.HeaderSize, (int)payloadLength);
-                uint actualCrc = GdocCrc32.Compute(payloadSpan);
-                if (actualCrc != expectedCrc)
-                {
-                    throw new InvalidDataException($"CRC32 mismatch in .gdoc file: expected 0x{expectedCrc:X8}, calculated 0x{actualCrc:X8}");
-                }
+                throw new InvalidDataException($".gdoc payload exceeds maximum supported span length ({payloadLength} bytes).");
             }
 
-            _nodeCount = *(uint*)(_basePointer + 6);
-            ulong stringArenaOffset = *(ulong*)(_basePointer + 10);
-            ulong stringArenaLength = *(ulong*)(_basePointer + 18);
-            ulong nodeTableOffset = *(ulong*)(_basePointer + 26);
-            ulong metadataTableOffset = *(ulong*)(_basePointer + 42);
-            ulong metadataTableLength = *(ulong*)(_basePointer + 50);
+            _mmf = MemoryMappedFile.CreateFromFile(gdocFilePath, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+            _accessor = _mmf.CreateViewAccessor(0, fileLength, MemoryMappedFileAccess.Read);
+            _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref _basePointer);
 
-            _metadataCount = (uint)(metadataTableLength / 16);
-            _nodeTable = (GdocNodeEntry*)(_basePointer + nodeTableOffset);
-            _stringArena = _basePointer + stringArenaOffset;
-            _metadataTable = (GdocMetadataEntry*)(_basePointer + metadataTableOffset);
+            try
+            {
+                // 1. Validate magic and version
+                uint magic = *(uint*)_basePointer;
+                if (magic != GdocWriter.GdocMagic)
+                {
+                    throw new InvalidDataException($"Invalid .gdoc file magic identifier: 0x{magic:X8}");
+                }
+
+                ushort version = *(ushort*)(_basePointer + 4);
+                if (version != GdocWriter.CurrentVersion)
+                {
+                    throw new InvalidDataException($"Unsupported .gdoc file version: {version}");
+                }
+
+                // 2. Validate CRC
+                uint expectedCrc = *(uint*)(_basePointer + 58);
+                if (payloadLength > 0)
+                {
+                    var payloadSpan = new ReadOnlySpan<byte>(_basePointer + GdocWriter.HeaderSize, (int)payloadLength);
+                    uint actualCrc = GdocCrc32.Compute(payloadSpan);
+                    if (actualCrc != expectedCrc)
+                    {
+                        throw new InvalidDataException($"CRC32 mismatch in .gdoc file: expected 0x{expectedCrc:X8}, calculated 0x{actualCrc:X8}");
+                    }
+                }
+
+                // 3. Validate section offsets and lengths against fileLength
+                ulong uFileLength = (ulong)fileLength;
+                _nodeCount = *(uint*)(_basePointer + 6);
+                ulong stringArenaOffset = *(ulong*)(_basePointer + 10);
+                ulong stringArenaLength = *(ulong*)(_basePointer + 18);
+                ulong nodeTableOffset = *(ulong*)(_basePointer + 26);
+                ulong nodeTableLength = *(ulong*)(_basePointer + 34);
+                ulong metadataTableOffset = *(ulong*)(_basePointer + 42);
+                ulong metadataTableLength = *(ulong*)(_basePointer + 50);
+
+                ulong expectedNodeTableLength = (ulong)_nodeCount * 32UL;
+                if (nodeTableLength != expectedNodeTableLength ||
+                    nodeTableOffset < GdocWriter.HeaderSize ||
+                    nodeTableOffset > uFileLength ||
+                    nodeTableLength > uFileLength - nodeTableOffset)
+                {
+                    throw new InvalidDataException("Invalid .gdoc node table bounds in header.");
+                }
+
+                if (stringArenaOffset < GdocWriter.HeaderSize ||
+                    stringArenaOffset > uFileLength ||
+                    stringArenaLength > uFileLength - stringArenaOffset)
+                {
+                    throw new InvalidDataException("Invalid .gdoc string arena bounds in header.");
+                }
+
+                if ((metadataTableLength & 15UL) != 0 ||
+                    metadataTableOffset < GdocWriter.HeaderSize ||
+                    metadataTableOffset > uFileLength ||
+                    metadataTableLength > uFileLength - metadataTableOffset ||
+                    metadataTableLength / 16UL > uint.MaxValue)
+                {
+                    throw new InvalidDataException("Invalid .gdoc metadata table bounds in header.");
+                }
+
+                _stringArenaLength = stringArenaLength;
+                _metadataCount = (uint)(metadataTableLength / 16UL);
+                _nodeTable = (GdocNodeEntry*)(_basePointer + nodeTableOffset);
+                _stringArena = _basePointer + stringArenaOffset;
+                _metadataTable = (GdocMetadataEntry*)(_basePointer + metadataTableOffset);
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
         }
 
         public uint MetadataCount => _metadataCount;
@@ -85,7 +129,8 @@ namespace Glacier.DocTree.Binary
             var result = new List<int>();
             ref readonly var node = ref GetNode(nodeIndex);
             int childIdx = node.FirstChildIndex;
-            while (childIdx >= 0 && childIdx < (int)_nodeCount)
+            int remaining = (int)_nodeCount;
+            while (childIdx >= 0 && childIdx < (int)_nodeCount && remaining-- > 0)
             {
                 result.Add(childIdx);
                 ref readonly var child = ref GetNode(childIdx);
@@ -97,6 +142,7 @@ namespace Glacier.DocTree.Binary
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ref readonly GdocNodeEntry GetNode(int nodeIndex)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             if ((uint)nodeIndex >= _nodeCount)
             {
                 throw new ArgumentOutOfRangeException(nameof(nodeIndex), $"Node index {nodeIndex} is out of bounds (0..{_nodeCount - 1}).");
@@ -109,6 +155,10 @@ namespace Glacier.DocTree.Binary
         {
             ref readonly var node = ref GetNode(nodeIndex);
             if (node.ContentLength == 0) return ReadOnlySpan<byte>.Empty;
+            if ((ulong)node.ContentOffset + (ulong)node.ContentLength > _stringArenaLength || node.ContentLength > int.MaxValue)
+            {
+                throw new InvalidDataException($"Out-of-bounds content slice on node {nodeIndex}.");
+            }
             return new ReadOnlySpan<byte>(_stringArena + node.ContentOffset, (int)node.ContentLength);
         }
 
@@ -125,9 +175,15 @@ namespace Glacier.DocTree.Binary
             if (node.MetadataCount == 0 || node.MetadataIndex < 0) return result;
 
             int metaIdx = node.MetadataIndex;
-            while (metaIdx >= 0 && metaIdx < (int)_metadataCount)
+            int remaining = (int)_metadataCount;
+            while (metaIdx >= 0 && metaIdx < (int)_metadataCount && remaining-- > 0)
             {
                 ref readonly var m = ref _metadataTable[metaIdx];
+                if ((ulong)m.KeyOffset + (ulong)m.KeyLength > _stringArenaLength ||
+                    (ulong)m.ValOffset + (ulong)m.ValLength > _stringArenaLength)
+                {
+                    throw new InvalidDataException($"Out-of-bounds metadata entry {metaIdx} on node {nodeIndex}.");
+                }
                 string key = Encoding.UTF8.GetString(_stringArena + m.KeyOffset, m.KeyLength);
                 string val = Encoding.UTF8.GetString(_stringArena + m.ValOffset, m.ValLength);
                 result[key] = val;
@@ -139,6 +195,7 @@ namespace Glacier.DocTree.Binary
 
         public DocNode ToDocNodeTree()
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             if (_nodeCount == 0)
             {
                 return new DocNode { Type = NodeType.Root };
@@ -160,7 +217,7 @@ namespace Glacier.DocTree.Binary
             for (int i = 0; i < _nodeCount; i++)
             {
                 ref readonly var entry = ref GetNode(i);
-                if (entry.ParentIndex >= 0 && entry.ParentIndex < _nodeCount)
+                if (entry.ParentIndex >= 0 && entry.ParentIndex < _nodeCount && entry.ParentIndex != i)
                 {
                     nodes[entry.ParentIndex].AddChild(nodes[i]);
                 }

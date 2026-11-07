@@ -20,10 +20,23 @@ namespace Glacier.DocTree.Core
         public LazyDocNode(string directoryPath, string nodeId)
         {
             _directoryPath = directoryPath ?? throw new ArgumentNullException(nameof(directoryPath));
-            _nodeId = nodeId ?? throw new ArgumentNullException(nameof(nodeId));
+            _nodeId = ValidateNodeId(nodeId);
         }
 
         public string NodeId => _nodeId;
+
+        private static string ValidateNodeId(string nodeId)
+        {
+            if (string.IsNullOrWhiteSpace(nodeId))
+            {
+                throw new ArgumentException("Node ID cannot be null or whitespace.", nameof(nodeId));
+            }
+            if (nodeId.IndexOfAny(new[] { '/', '\\', ':' }) >= 0 || nodeId.Contains("..", StringComparison.Ordinal))
+            {
+                throw new ArgumentException($"Invalid node identifier: '{nodeId}'.", nameof(nodeId));
+            }
+            return nodeId;
+        }
 
         private void EnsureLoaded()
         {
@@ -40,7 +53,7 @@ namespace Glacier.DocTree.Core
                 }
 
                 string json = File.ReadAllText(filePath);
-                var dto = JsonSerializer.Deserialize<SerializedDocNodeDto>(json);
+                var dto = JsonSerializer.Deserialize(json, DocTreeJsonContext.Default.SerializedDocNodeDto);
                 if (dto != null)
                 {
                     _type = dto.Type;

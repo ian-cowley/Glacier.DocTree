@@ -2,9 +2,17 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Glacier.DocTree.Core
 {
+    [JsonSourceGenerationOptions(WriteIndented = true)]
+    [JsonSerializable(typeof(SerializedDocNodeDto))]
+    [JsonSerializable(typeof(Dictionary<string, string>))]
+    internal partial class DocTreeJsonContext : JsonSerializerContext
+    {
+    }
+
     public static class TreeSerializer
     {
         /// <summary>
@@ -22,7 +30,6 @@ namespace Glacier.DocTree.Core
             }
             else
             {
-                // Clear existing files in the directory
                 foreach (var file in Directory.GetFiles(directoryPath, "*.json"))
                 {
                     try { File.Delete(file); } catch { }
@@ -53,8 +60,6 @@ namespace Glacier.DocTree.Core
         {
             var childrenIds = new List<string>();
 
-            // If the node is a LazyDocNode and hasn't been loaded, we could preserve its existing children IDs.
-            // But normally we'll just traverse whatever is loaded or load it as we go.
             for (int i = 0; i < node.Children.Count; i++)
             {
                 string childId = Guid.NewGuid().ToString("N");
@@ -72,8 +77,7 @@ namespace Glacier.DocTree.Core
             };
 
             string filePath = Path.Combine(directoryPath, $"{nodeId}.json");
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            string json = JsonSerializer.Serialize(dto, options);
+            string json = JsonSerializer.Serialize(dto, DocTreeJsonContext.Default.SerializedDocNodeDto);
             File.WriteAllText(filePath, json);
         }
 

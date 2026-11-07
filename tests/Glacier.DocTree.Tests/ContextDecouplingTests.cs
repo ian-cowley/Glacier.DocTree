@@ -153,4 +153,31 @@ public class ContextDecouplingTests
             }
         }
     }
+
+    [Fact]
+    public void ColumnarContextDecoupler_DecoupleMarkdownTable_ParsesTypedColumns()
+    {
+        string mdTable = @"
+| Id | Service | LatencyMs |
+| --- | :---: | ---: |
+| 10 | Auth | 12.5 |
+| 20 | Search | 4.25 |
+";
+        using var df = ColumnarContextDecoupler.DecoupleMarkdownTable(mdTable.AsSpan());
+        Assert.Equal(2, df.RowCount);
+        Assert.Equal(3, df.Columns.Count);
+        Assert.Equal(10, ColumnarContextDecoupler.GetInt32ColumnSpan(df, "Id")[0]);
+        Assert.Equal(4.25f, ColumnarContextDecoupler.GetFloat32ColumnSpan(df, "LatencyMs")[1], 0.001f);
+    }
+
+    [Fact]
+    public void GraphContextDecoupler_ExtractDocumentGraph_ExtractsHierarchyAndLinks()
+    {
+        string md = "# Overview\nSee [Security Rules](#security-rules) and [[AuditLog]].\n\n## Security Rules\nEnforce zero secrets.";
+        var root = Glacier.DocTree.Parser.SpanMarkdownParser.Parse(md.AsSpan());
+        var store = GraphContextDecoupler.ExtractDocumentGraph(root);
+
+        Assert.True(store.NodeCount >= 4);
+        Assert.True(store.EdgeCount >= 4);
+    }
 }

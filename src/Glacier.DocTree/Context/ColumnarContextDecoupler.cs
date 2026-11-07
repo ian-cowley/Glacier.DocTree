@@ -1,15 +1,16 @@
 using System;
 using System.Collections.Generic;
-using System.Text;
+using System.Globalization;
+using Glacier.DocTree.Parser;
 using Glacier.Polaris;
 using Glacier.Polaris.Data;
 
 namespace Glacier.DocTree.Context;
 
 /// <summary>
-/// Decouples invariant tabular contextual facts (telemetry records, database tables, CSV/JSON logs)
-/// from the autoregressive LLM prompt stream into high-performance Apache Arrow-aligned
-/// Glacier.Polaris.DataFrame structures resident in host memory.
+/// Decouples invariant tabular contextual facts (Markdown tables, telemetry records, structured logs)
+/// from the autoregressive LLM prompt stream into Apache Arrow-aligned
+/// <see cref="DataFrame"/> structures resident in host memory.
 /// </summary>
 public static class ColumnarContextDecoupler
 {
@@ -24,10 +25,148 @@ public static class ColumnarContextDecoupler
         $"[POLARIS_REF: Table={tableName}, Rows={rowCount}, Cols={columnCount}]";
 
     /// <summary>
-    /// Parses and decouples simple structured telemetry records (ID, DeviceId, Metric, Status) into a columnar DataFrame.
+    /// Parses a pipe-delimited Markdown table into a typed <see cref="DataFrame"/> (inferring Int32, Float32, or UTF-8 string columns).
+    /// </summary>
+    public static DataFrame DecoupleMarkdownTable(ReadOnlySpan<char> markdownTable)
+    {
+        string[]? headers = null;
+        var rows = new List<string[]>();
+        bool seenSeparator = false;
+
+        var enumerator = new SpanLineEnumerator(markdownTable);
+        while (enumerator.MoveNext())
+        {
+            var line = enumerator.Current.Trim();
+            if (line.IsEmpty || line[0] != '|')
+            {
+                continue;
+            }
+
+            var cells = ParsePipeRow(line);
+            if (cells.Length == 0)
+            {
+                continue;
+            }
+
+            if (headers == null)
+            {
+                headers = cells;
+                continue;
+            }
+
+            if (!seenSeparator && IsSeparatorRow(cells))
+            {
+                seenSeparator = true;
+                continue;
+            }
+
+            rows.Add(cells);
+        }
+
+        if (headers == null || headers.Length == 0)
+        {
+            throw new ArgumentException("Input does not contain a valid pipe-delimited Markdown table header.", nameof(markdownTable));
+        }
+
+        int colCount = headers.Length;
+        int rowCount = rows.Count;
+        var columns = new ISeries[colCount];
+
+        for (int c = 0; c < colCount; c++)
+        {
+            string colName = string.IsNullOrWhiteSpace(headers[c]) ? $"Col_{c}" : headers[c];
+            bool allInt = rowCount > 0;
+            bool allFloat = rowCount > 0;
+
+            for (int r = 0; r < rowCount; r++)
+            {
+                string cell = c < rows[r].Length ? rows[r][c] : string.Empty;
+                if (allInt && !int.TryParse(cell, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+                {
+                    allInt = false;
+                }
+                if (allFloat && !float.TryParse(cell, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out _))
+                {
+                    allFloat = false;
+                }
+            }
+
+            if (allInt)
+            {
+                var intSeries = new Int32Series(colName, rowCount);
+                Span<int> span = intSeries.Memory.Span;
+                for (int r = 0; r < rowCount; r++)
+                {
+                    span[r] = int.Parse(rows[r][c], NumberStyles.Integer, CultureInfo.InvariantCulture);
+                }
+                columns[c] = intSeries;
+            }
+            else if (allFloat)
+            {
+                var floatSeries = new Float32Series(colName, rowCount);
+                Span<float> span = floatSeries.Memory.Span;
+                for (int r = 0; r < rowCount; r++)
+                {
+                    span[r] = float.Parse(rows[r][c], NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture);
+                }
+                columns[c] = floatSeries;
+            }
+            else
+            {
+                var values = new string?[rowCount];
+                for (int r = 0; r < rowCount; r++)
+                {
+                    values[r] = c < rows[r].Length ? rows[r][c] : string.Empty;
+                }
+                columns[c] = Utf8StringSeries.FromStrings(colName, values);
+            }
+        }
+
+        return new DataFrame(columns);
+    }
+
+    private static string[] ParsePipeRow(ReadOnlySpan<char> line)
+    {
+        if (line.Length > 0 && line[0] == '|') line = line[1..];
+        if (line.Length > 0 && line[^1] == '|') line = line[..^1];
+
+        var parts = new List<string>();
+        int start = 0;
+        for (int i = 0; i <= line.Length; i++)
+        {
+            if (i == line.Length || line[i] == '|')
+            {
+                parts.Add(line.Slice(start, i - start).Trim().ToString());
+                start = i + 1;
+            }
+        }
+        return parts.ToArray();
+    }
+
+    private static bool IsSeparatorRow(string[] cells)
+    {
+        for (int i = 0; i < cells.Length; i++)
+        {
+            var cell = cells[i].AsSpan().Trim();
+            if (cell.IsEmpty) return false;
+            int dashCount = 0;
+            for (int j = 0; j < cell.Length; j++)
+            {
+                char ch = cell[j];
+                if (ch == '-') dashCount++;
+                else if (ch != ':' && ch != ' ') return false;
+            }
+            if (dashCount < 2) return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Decouples structured telemetry records (ID, DeviceId, Metric, Status) into a columnar DataFrame.
     /// </summary>
     public static DataFrame DecoupleTelemetryRecords(IEnumerable<(int Id, int DeviceId, float Metric, int Status)> records)
     {
+        ArgumentNullException.ThrowIfNull(records);
         var list = new List<(int Id, int DeviceId, float Metric, int Status)>(records);
         int count = list.Count;
 
