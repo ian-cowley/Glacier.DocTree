@@ -1,6 +1,7 @@
 namespace Glacier.DocTree.GDoc;
 
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.MemoryMappedFiles;
@@ -14,6 +15,8 @@ public sealed unsafe class GDocReader : IDisposable
 {
     private readonly MemoryMappedFile? _mmf;
     private readonly MemoryMappedViewAccessor? _accessor;
+    private MemoryHandle _memoryHandle;
+    private readonly bool _ownsMemoryHandle;
     private readonly byte* _pointer;
     private readonly long _length;
     private readonly bool _ownsPointer;
@@ -34,32 +37,95 @@ public sealed unsafe class GDocReader : IDisposable
         byte* ptr = null;
         accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
 
-        return new GDocReader(mmf, accessor, ptr, fi.Length, ownsPointer: true);
+        return new GDocReader(mmf, accessor, default, ownsMemoryHandle: false, ptr, fi.Length, ownsPointer: true);
     }
 
     public static GDocReader FromMemory(ReadOnlyMemory<byte> memory)
     {
         var handle = memory.Pin();
-        return new GDocReader(null, null, (byte*)handle.Pointer, memory.Length, ownsPointer: false);
+        return new GDocReader(null, null, handle, ownsMemoryHandle: true, (byte*)handle.Pointer, memory.Length, ownsPointer: false);
     }
 
-    private GDocReader(MemoryMappedFile? mmf, MemoryMappedViewAccessor? accessor, byte* pointer, long length, bool ownsPointer)
+    private GDocReader(
+        MemoryMappedFile? mmf,
+        MemoryMappedViewAccessor? accessor,
+        MemoryHandle memoryHandle,
+        bool ownsMemoryHandle,
+        byte* pointer,
+        long length,
+        bool ownsPointer)
     {
         _mmf = mmf;
         _accessor = accessor;
+        _memoryHandle = memoryHandle;
+        _ownsMemoryHandle = ownsMemoryHandle;
         _pointer = pointer;
         _length = length;
         _ownsPointer = ownsPointer;
 
-        if (_length < 64)
+        try
         {
-            throw new InvalidDataException("Invalid .gdoc file: length smaller than header size.");
-        }
+            if (_length < 64)
+            {
+                throw new InvalidDataException("Invalid .gdoc file: length smaller than header size.");
+            }
 
-        _header = Unsafe.Read<GDocHeader>(_pointer);
-        if (_header.Magic != GDocHeader.MagicValue)
+            _header = Unsafe.Read<GDocHeader>(_pointer);
+            if (_header.Magic != GDocHeader.MagicValue)
+            {
+                throw new InvalidDataException($"Invalid .gdoc magic header: 0x{_header.Magic:X8}");
+            }
+
+            ulong totalLen = (ulong)_length;
+            if (_header.StringPoolOffset > totalLen ||
+                (ulong)_header.StringPoolOffset + _header.StringPoolLength > totalLen)
+            {
+                throw new InvalidDataException("Invalid .gdoc header: string pool extends beyond file length.");
+            }
+
+            if (_header.AstNodeCount > 0)
+            {
+                if (_header.AstNodeSize < (uint)sizeof(GDocAstNode))
+                {
+                    throw new InvalidDataException("Invalid .gdoc header: AST node stride smaller than GDocAstNode.");
+                }
+                ulong astEnd = checked((ulong)_header.AstTableOffset + (ulong)_header.AstNodeCount * _header.AstNodeSize);
+                if (astEnd > totalLen)
+                {
+                    throw new InvalidDataException("Invalid .gdoc header: AST table extends beyond file length.");
+                }
+            }
+
+            if (_header.TokenSpanCount > 0)
+            {
+                if (_header.TokenSpanSize < (uint)sizeof(GDocTokenSpan))
+                {
+                    throw new InvalidDataException("Invalid .gdoc header: token span stride smaller than GDocTokenSpan.");
+                }
+                ulong spanEnd = checked((ulong)_header.TokenSpanOffset + (ulong)_header.TokenSpanCount * _header.TokenSpanSize);
+                if (spanEnd > totalLen)
+                {
+                    throw new InvalidDataException("Invalid .gdoc header: token span table extends beyond file length.");
+                }
+            }
+
+            if (_header.VectorCount > 0)
+            {
+                if (_header.VectorDim == 0)
+                {
+                    throw new InvalidDataException("Invalid .gdoc header: vector dimension must be positive when VectorCount > 0.");
+                }
+                ulong vecEnd = checked((ulong)_header.VectorOffset + (ulong)_header.VectorCount * _header.VectorDim * sizeof(float));
+                if (vecEnd > totalLen)
+                {
+                    throw new InvalidDataException("Invalid .gdoc header: vector table extends beyond file length.");
+                }
+            }
+        }
+        catch
         {
-            throw new InvalidDataException($"Invalid .gdoc magic header: 0x{_header.Magic:X8}");
+            Dispose();
+            throw;
         }
     }
 
@@ -71,7 +137,7 @@ public sealed unsafe class GDocReader : IDisposable
             throw new ArgumentOutOfRangeException(nameof(id));
         }
 
-        byte* nodePtr = _pointer + _header.AstTableOffset + (id * _header.AstNodeSize);
+        byte* nodePtr = _pointer + _header.AstTableOffset + ((ulong)id * _header.AstNodeSize);
         return ref Unsafe.AsRef<GDocAstNode>(nodePtr);
     }
 
@@ -79,6 +145,11 @@ public sealed unsafe class GDocReader : IDisposable
     public ReadOnlySpan<byte> GetTextUtf8(in GDocAstNode node)
     {
         if (node.TextLength == 0) return ReadOnlySpan<byte>.Empty;
+        ulong end = checked((ulong)_header.StringPoolOffset + node.TextOffset + node.TextLength);
+        if (end > (ulong)_length)
+        {
+            throw new InvalidDataException("Invalid .gdoc AST node: text span extends beyond file length.");
+        }
         byte* textPtr = _pointer + _header.StringPoolOffset + node.TextOffset;
         return new ReadOnlySpan<byte>(textPtr, node.TextLength);
     }
@@ -97,7 +168,14 @@ public sealed unsafe class GDocReader : IDisposable
             return ReadOnlySpan<float>.Empty;
         }
 
-        byte* vecPtr = _pointer + _header.VectorOffset + (node.VectorIndex * _header.VectorDim * sizeof(float));
+        ulong vecByteOffset = checked((ulong)node.VectorIndex * _header.VectorDim * sizeof(float));
+        ulong vecEnd = checked((ulong)_header.VectorOffset + vecByteOffset + ((ulong)_header.VectorDim * sizeof(float)));
+        if (vecEnd > (ulong)_length || _header.VectorDim > int.MaxValue)
+        {
+            throw new InvalidDataException("Invalid .gdoc AST node: vector extends beyond file length.");
+        }
+
+        byte* vecPtr = _pointer + _header.VectorOffset + vecByteOffset;
         return new ReadOnlySpan<float>(vecPtr, (int)_header.VectorDim);
     }
 
@@ -109,17 +187,22 @@ public sealed unsafe class GDocReader : IDisposable
             throw new ArgumentOutOfRangeException(nameof(index));
         }
 
-        byte* spanPtr = _pointer + _header.TokenSpanOffset + (index * _header.TokenSpanSize);
+        byte* spanPtr = _pointer + _header.TokenSpanOffset + ((ulong)index * _header.TokenSpanSize);
         return ref Unsafe.AsRef<GDocTokenSpan>(spanPtr);
     }
 
     public List<uint> GetChildren(uint nodeId)
     {
         var result = new List<uint>();
+        var visited = new HashSet<uint>();
         ref readonly var parent = ref GetNode(nodeId);
         uint curr = parent.FirstChildId;
         while (curr != GDocAstNode.NoNode)
         {
+            if (!visited.Add(curr))
+            {
+                throw new InvalidDataException("Cycle detected in .gdoc AST sibling chain.");
+            }
             result.Add(curr);
             ref readonly var child = ref GetNode(curr);
             curr = child.NextSiblingId;
@@ -130,9 +213,14 @@ public sealed unsafe class GDocReader : IDisposable
     public List<uint> GetBreadcrumbs(uint nodeId)
     {
         var breadcrumbs = new List<uint>();
+        var visited = new HashSet<uint>();
         uint curr = nodeId;
         while (curr != GDocAstNode.NoNode)
         {
+            if (!visited.Add(curr))
+            {
+                throw new InvalidDataException("Cycle detected in .gdoc AST parent chain.");
+            }
             breadcrumbs.Add(curr);
             ref readonly var node = ref GetNode(curr);
             curr = node.ParentId;
@@ -244,6 +332,10 @@ public sealed unsafe class GDocReader : IDisposable
         if (!_isDisposed)
         {
             _isDisposed = true;
+            if (_ownsMemoryHandle)
+            {
+                _memoryHandle.Dispose();
+            }
             if (_ownsPointer && _accessor != null)
             {
                 _accessor.SafeMemoryMappedViewHandle.ReleasePointer();

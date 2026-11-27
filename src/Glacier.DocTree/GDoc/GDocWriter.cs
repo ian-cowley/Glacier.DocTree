@@ -68,14 +68,24 @@ public sealed class GDocWriter
         uint vectorIndex = GDocAstNode.NoVector,
         ushort flags = 0)
     {
+        if (tokenSpanIndex > ushort.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(tokenSpanIndex), $"Token span index {tokenSpanIndex} exceeds maximum ushort value ({ushort.MaxValue}).");
+        }
+
         uint id = (uint)_nodes.Count;
         uint textOffset = 0;
         ushort textLen = 0;
 
         if (!string.IsNullOrEmpty(text))
         {
+            int byteCount = Encoding.UTF8.GetByteCount(text);
+            if (byteCount > ushort.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(nameof(text), $"Node text UTF-8 byte length ({byteCount}) exceeds maximum GDocAstNode length ({ushort.MaxValue}).");
+            }
             textOffset = AddString(text);
-            textLen = (ushort)Encoding.UTF8.GetByteCount(text);
+            textLen = (ushort)byteCount;
         }
 
         _nodes.Add(new GDocAstNode

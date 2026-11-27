@@ -98,4 +98,36 @@ public class GDocTests
             }
         }
     }
+
+    [Fact]
+    public void GDocReader_RejectsOutOfBoundsHeaderTablesAndCycles()
+    {
+        // Truncated AST table reported in header -> InvalidDataException (no AV / leak)
+        var writer = new GDocWriter(vectorDim: 4);
+        writer.AddNode(GDocNodeType.Document, "Root");
+        byte[] valid = writer.ToByteArray();
+
+        byte[] badAst = (byte[])valid.Clone();
+        // AstNodeCount is at offset 20 (5th uint) in GDocHeader
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(badAst.AsSpan(20, 4), 999999u);
+        Assert.Throws<InvalidDataException>(() => GDocReader.FromMemory(badAst));
+
+        // Cycle detection in sibling chain
+        var cycWriter = new GDocWriter(vectorDim: 4);
+        uint r = cycWriter.AddNode(GDocNodeType.Document, "Root");
+        uint c1 = cycWriter.AddNode(GDocNodeType.Paragraph, "A");
+        cycWriter.LinkChild(r, c1);
+        byte[] cycBytes = cycWriter.ToByteArray();
+        uint astOffset = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(cycBytes.AsSpan(16, 4));
+        // Point node 1 NextSiblingId (byte +16 inside 32B GDocAstNode) back to itself
+        int node1NextSibOffset = checked((int)astOffset + 32 + 16);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(cycBytes.AsSpan(node1NextSibOffset, 4), c1);
+
+        using var cycReader = GDocReader.FromMemory(cycBytes);
+        Assert.Throws<InvalidDataException>(() => cycReader.GetChildren(r));
+
+        // Oversized node text (>65535 UTF-8 bytes) rejected instead of silent truncation
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new GDocWriter().AddNode(GDocNodeType.Paragraph, new string('x', 70_000)));
+    }
 }
