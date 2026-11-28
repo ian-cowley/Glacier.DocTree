@@ -7,8 +7,8 @@ using Glacier.DocTree.Core;
 using Glacier.DocTree.GDoc;
 
 /// <summary>
-/// First-party binary AST serialization extensions connecting Glacier.DocTree with Glacier.Storage.Doc (.gdoc).
-/// Preserves exact NodeType (including Header4–Header6) and per-node Metadata dictionaries.
+/// First-party binary AST serialization extensions connecting Glacier.DocTree with the unified .gdoc v2 format.
+/// Preserves exact <see cref="NodeType"/> (including Header4–Header6) and native per-node metadata entries.
 /// </summary>
 public static class GlacierStorageDocExtensions
 {
@@ -56,38 +56,48 @@ public static class GlacierStorageDocExtensions
         };
     }
 
+    internal static GDocWriter BuildGDocWriter(DocNode root, int vectorDim = 768)
+    {
+        var writer = new GDocWriter(vectorDim: vectorDim);
+        using var stack = new ValueDocNodeStack<(DocNode Node, uint ParentId)>();
+        stack.Push((root, GDocAstNode.NoNode));
+
+        while (stack.Count > 0)
+        {
+            var (node, parentId) = stack.Pop();
+            var gType = ToGDocType(node.Type);
+            ushort flags = (ushort)(ExactNodeTypeTag | ((ushort)node.Type & ExactNodeTypeMask));
+            uint nodeId = writer.AddNode(gType, node.Content, parentId: parentId, flags: flags);
+            writer.SetCoreNodeType(nodeId, node.Type);
+
+            if (parentId != GDocAstNode.NoNode)
+            {
+                writer.LinkChild(parentId, nodeId);
+            }
+
+            if (node.Metadata is { Count: > 0 })
+            {
+                writer.AddMetadata(nodeId, node.Metadata);
+            }
+
+            var children = node.Children;
+            for (int i = children.Count - 1; i >= 0; i--)
+            {
+                stack.Push((children[i], nodeId));
+            }
+        }
+
+        return writer;
+    }
+
     /// <summary>
-    /// Serializes a DocNode hierarchy into a stream in Glacier.Storage .gdoc format.
+    /// Serializes a DocNode hierarchy into a stream in unified .gdoc v2 format.
     /// </summary>
     public static void SaveGdoc(this DocNode root, Stream stream)
     {
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(stream);
-        var writer = new GDocWriter(vectorDim: 768);
-        WriteRecursive(writer, root, GDocAstNode.NoNode);
-        writer.WriteToStream(stream);
-    }
-
-    private static uint WriteRecursive(GDocWriter writer, DocNode node, uint parentId)
-    {
-        var gType = ToGDocType(node.Type);
-        ushort flags = (ushort)(ExactNodeTypeTag | ((ushort)node.Type & ExactNodeTypeMask));
-        uint nodeId = writer.AddNode(gType, node.Content, parentId: parentId, flags: flags);
-
-        if (node.Metadata is { Count: > 0 })
-        {
-            string metaJson = JsonSerializer.Serialize(node.Metadata, DocTreeJsonContext.Default.DictionaryStringString);
-            uint metaNodeId = writer.AddNode(GDocNodeType.Text, metaJson, parentId: nodeId, flags: MetadataBlobFlag);
-            writer.LinkChild(nodeId, metaNodeId);
-        }
-
-        foreach (var child in node.Children)
-        {
-            uint childId = WriteRecursive(writer, child, nodeId);
-            writer.LinkChild(nodeId, childId);
-        }
-
-        return nodeId;
+        BuildGDocWriter(root, vectorDim: 768).WriteToStream(stream);
     }
 
     /// <summary>
@@ -96,25 +106,20 @@ public static class GlacierStorageDocExtensions
     public static byte[] ToGdocBytes(this DocNode root)
     {
         ArgumentNullException.ThrowIfNull(root);
-        var writer = new GDocWriter(vectorDim: 768);
-        WriteRecursive(writer, root, GDocAstNode.NoNode);
-        return writer.ToByteArray();
+        return BuildGDocWriter(root, vectorDim: 768).ToByteArray();
     }
 
     /// <summary>
-    /// Serializes and writes a DocNode hierarchy directly to a .gdoc file.
+    /// Serializes and atomically writes a DocNode hierarchy directly to a .gdoc file.
     /// </summary>
     public static void SaveGdoc(this DocNode root, string filePath)
     {
         ArgumentNullException.ThrowIfNull(root);
-        var dir = Path.GetDirectoryName(filePath);
-        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
-        var bytes = ToGdocBytes(root);
-        File.WriteAllBytes(filePath, bytes);
+        BuildGDocWriter(root, vectorDim: 768).WriteToFile(filePath);
     }
 
     /// <summary>
-    /// Reads a .gdoc byte array or memory and constructs a DocNode hierarchy.
+    /// Reads a .gdoc byte array or memory (v1 or unified v2) and constructs a DocNode hierarchy.
     /// </summary>
     public static DocNode LoadGdoc(ReadOnlyMemory<byte> memory)
     {
@@ -124,53 +129,96 @@ public static class GlacierStorageDocExtensions
             return new DocNode { Type = NodeType.Root };
         }
 
-        ref readonly var ast = ref reader.GetNode(0);
-        string text = reader.GetText(in ast);
+        bool isLegacyV1 = reader.Header.Version == GDocHeader.LegacyVersion1;
+        ref readonly var rootAst = ref reader.GetNode(0);
         var root = new DocNode
         {
-            Type = FromGDocType((GDocNodeType)ast.NodeType, ast.Flags),
-            Content = text
+            Type = ResolveNodeType(in rootAst),
+            Content = reader.GetText(in rootAst),
+            Metadata = reader.GetMetadata(0)
         };
 
-        ReconstructChildren(reader, 0, root);
+        using var stack = new ValueDocNodeStack<(uint NodeId, DocNode DocNode)>();
+        var visited = new bool[reader.NodeCount];
+        visited[0] = true;
+        stack.Push((0u, root));
+
+        while (stack.Count > 0)
+        {
+            var (parentIdx, parentNode) = stack.Pop();
+            var childIndices = reader.GetChildren(parentIdx);
+
+            // First pass in forward order to preserve child ordering and handle legacy v1 metadata blobs
+            int firstAddedChildOffset = parentNode.Children.Count;
+            for (int i = 0; i < childIndices.Count; i++)
+            {
+                uint childIdx = childIndices[i];
+                if (childIdx >= reader.NodeCount)
+                {
+                    throw new InvalidDataException($"Invalid .gdoc AST child node index {childIdx} (node count {reader.NodeCount}).");
+                }
+                if (visited[childIdx])
+                {
+                    throw new InvalidDataException($"Cycle detected in .gdoc AST at node {childIdx}.");
+                }
+                visited[childIdx] = true;
+
+                ref readonly var childAst = ref reader.GetNode(childIdx);
+                string childText = reader.GetText(in childAst);
+
+                if (isLegacyV1 && (childAst.Flags & MetadataBlobFlag) != 0)
+                {
+                    if (!string.IsNullOrEmpty(childText))
+                    {
+                        var decoded = JsonSerializer.Deserialize(childText, DocTreeJsonContext.Default.DictionaryStringString);
+                        if (decoded != null)
+                        {
+                            foreach (var kvp in decoded)
+                            {
+                                parentNode.Metadata[kvp.Key] = kvp.Value;
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                var childNode = new DocNode
+                {
+                    Type = ResolveNodeType(in childAst),
+                    Content = childText,
+                    Metadata = reader.GetMetadata(childIdx)
+                };
+                parentNode.AddChild(childNode);
+            }
+
+            // Push newly added non-metadata children in reverse order for iterative pre-order traversal
+            int addedIdx = parentNode.Children.Count - 1;
+            for (int i = childIndices.Count - 1; i >= 0 && addedIdx >= firstAddedChildOffset; i--)
+            {
+                uint childIdx = childIndices[i];
+                ref readonly var childAst = ref reader.GetNode(childIdx);
+                if (isLegacyV1 && (childAst.Flags & MetadataBlobFlag) != 0)
+                {
+                    continue;
+                }
+
+                var childNode = parentNode.Children[addedIdx--];
+                if (childAst.FirstChildId != GDocAstNode.NoNode)
+                {
+                    stack.Push((childIdx, childNode));
+                }
+            }
+        }
+
         return root;
     }
 
-    private static void ReconstructChildren(GDocReader reader, uint parentIdx, DocNode parentNode)
+    internal static NodeType ResolveNodeType(in GDocAstNode ast)
     {
-        var childIndices = reader.GetChildren(parentIdx);
-        foreach (var childIdx in childIndices)
+        if (ast.CoreNodeType != 0 && Enum.IsDefined((NodeType)ast.CoreNodeType))
         {
-            ref readonly var childAst = ref reader.GetNode(childIdx);
-            string childText = reader.GetText(in childAst);
-
-            if ((childAst.Flags & MetadataBlobFlag) != 0)
-            {
-                if (!string.IsNullOrEmpty(childText))
-                {
-                    var decoded = JsonSerializer.Deserialize(childText, DocTreeJsonContext.Default.DictionaryStringString);
-                    if (decoded != null)
-                    {
-                        foreach (var kvp in decoded)
-                        {
-                            parentNode.Metadata[kvp.Key] = kvp.Value;
-                        }
-                    }
-                }
-                continue;
-            }
-
-            var childNode = new DocNode
-            {
-                Type = FromGDocType((GDocNodeType)childAst.NodeType, childAst.Flags),
-                Content = childText
-            };
-            parentNode.AddChild(childNode);
-
-            if (childAst.FirstChildId != GDocAstNode.NoNode)
-            {
-                ReconstructChildren(reader, childIdx, childNode);
-            }
+            return (NodeType)ast.CoreNodeType;
         }
+        return FromGDocType((GDocNodeType)ast.NodeType, ast.Flags);
     }
 }

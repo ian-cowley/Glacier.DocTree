@@ -90,5 +90,51 @@ Some other content.
             Assert.Contains("More details on A1", bundle);
             Assert.Contains("Section A > Subsection A1", bundle);
         }
+
+        [Fact]
+        public void Serialize_ExistingDirectory_PreservesUnrelatedJsonAndCleansStaleNodeFiles()
+        {
+            string appSettingsPath = Path.Combine(_tempDir, "appsettings.json");
+            string customJsonPath = Path.Combine(_tempDir, "custom_metadata.json");
+            File.WriteAllText(appSettingsPath, """{"env":"prod"}""");
+            File.WriteAllText(customJsonPath, """{"keep":true}""");
+
+            var parser = new MarkdownTreeParser();
+            var tree1 = parser.Parse("# First\nBody 1\n## Sub\nBody 2");
+            TreeSerializer.Serialize(tree1, _tempDir);
+
+            var afterTree1 = Directory.GetFiles(_tempDir, "*.json")
+                .Select(f => Path.GetFileName(f))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("appsettings.json", afterTree1);
+            Assert.Contains("custom_metadata.json", afterTree1);
+            Assert.Contains("root.json", afterTree1);
+
+            var tree1NodeFiles = afterTree1
+                .Where(f => f != "appsettings.json" && f != "custom_metadata.json" && f != "root.json")
+                .ToList();
+            Assert.Equal(4, tree1NodeFiles.Count);
+
+            // Re-serialize a completely different tree into the same directory
+            var tree2 = parser.Parse("# Second\nFresh body");
+            TreeSerializer.Serialize(tree2, _tempDir);
+
+            // Unrelated JSON files remain completely untouched
+            Assert.True(File.Exists(appSettingsPath));
+            Assert.True(File.Exists(customJsonPath));
+            Assert.Equal("""{"env":"prod"}""", File.ReadAllText(appSettingsPath));
+            Assert.Equal("""{"keep":true}""", File.ReadAllText(customJsonPath));
+
+            // All stale node JSONs from tree1 were removed
+            foreach (string stale in tree1NodeFiles)
+            {
+                Assert.False(File.Exists(Path.Combine(_tempDir, stale)), $"Stale node file {stale} was not cleaned up.");
+            }
+
+            // Lazily deserializing loads the new tree cleanly
+            var lazy = TreeSerializer.DeserializeLazy(_tempDir);
+            Assert.Contains("Fresh body", lazy.GetFullText());
+            Assert.DoesNotContain("Body 1", lazy.GetFullText());
+        }
     }
 }

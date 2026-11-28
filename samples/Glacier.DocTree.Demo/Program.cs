@@ -68,25 +68,32 @@ Do not use the API to train competing LLM models.
             Console.WriteLine("==========================================");
         }
 
-        // A quick helper to print the tree structure to the console
-        static void PrintTreeVisually(DocNode node, int indent)
+        // Iteratively print the tree structure to the console
+        static void PrintTreeVisually(DocNode root, int initialIndent)
         {
-            string indentStr = new string(' ', indent * 2);
+            var stack = new System.Collections.Generic.Stack<(DocNode Node, int Indent)>();
+            stack.Push((root, initialIndent));
 
-            string displayContent = node.Content;
-            if (node.Type == NodeType.Paragraph || node.Type == NodeType.CodeBlock)
+            while (stack.Count > 0)
             {
-                // Truncate long paragraphs/code for the visualizer
-                displayContent = displayContent.Replace("\n", " ").Replace("\r", "");
-                if (displayContent.Length > 40)
-                    displayContent = displayContent.Substring(0, 37) + "...";
-            }
+                var (node, indent) = stack.Pop();
+                string indentStr = new string(' ', indent * 2);
 
-            Console.WriteLine($"{indentStr}└─ [{node.Type}] {displayContent}");
+                string displayContent = node.Content;
+                if (node.Type == NodeType.Paragraph || node.Type == NodeType.CodeBlock)
+                {
+                    // Truncate long paragraphs/code for the visualizer
+                    displayContent = displayContent.Replace("\n", " ").Replace("\r", "");
+                    if (displayContent.Length > 40)
+                        displayContent = displayContent.Substring(0, 37) + "...";
+                }
 
-            foreach (var child in node.Children)
-            {
-                PrintTreeVisually(child, indent + 1);
+                Console.WriteLine($"{indentStr}└─ [{node.Type}] {displayContent}");
+
+                for (int i = node.Children.Count - 1; i >= 0; i--)
+                {
+                    stack.Push((node.Children[i], indent + 1));
+                }
             }
         }
     }

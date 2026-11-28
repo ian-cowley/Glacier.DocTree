@@ -316,5 +316,58 @@ Sub paragraph";
             File.WriteAllBytes(shortPath, new byte[16]);
             Assert.Throws<InvalidDataException>(() => new GdocReader(shortPath));
         }
+
+        [Fact]
+        public void GlacierStorageDocExtensions_V2NativeMetadata_ProducesZeroSyntheticTextNodes()
+        {
+            var root = new DocNode { Type = NodeType.Root, Content = "Root" };
+            root.Metadata["doc_id"] = "doc-42";
+
+            var h5 = new DocNode { Type = NodeType.Header5, Content = "Deep H5" };
+            h5.Metadata["anchor"] = "deep-h5";
+            h5.Metadata["role"] = "spec";
+            root.AddChild(h5);
+
+            byte[] bytes = root.ToGdocBytes();
+            using var gdocReader = Glacier.DocTree.GDoc.GDocReader.FromMemory(bytes);
+
+            // Exactly 2 AST nodes (Root + Header5) — zero synthetic JSON Text child nodes!
+            Assert.Equal(2u, gdocReader.NodeCount);
+            Assert.Equal(3u, gdocReader.MetadataCount);
+            Assert.Equal(Glacier.DocTree.GDoc.GDocHeader.CurrentVersion, gdocReader.Header.Version);
+            Assert.Equal("doc-42", gdocReader.GetMetadata(0)["doc_id"]);
+            Assert.Equal("deep-h5", gdocReader.GetMetadata(1)["anchor"]);
+            Assert.Equal("spec", gdocReader.GetMetadata(1)["role"]);
+            Assert.Equal((ushort)Glacier.DocTree.GDoc.GDocNodeType.Section, gdocReader.GetNode(1).NodeType);
+        }
+
+        [Fact]
+        public void GdocCrc32_MatchesStandardIeee8023Vectors()
+        {
+            Assert.Equal(0x00000000u, GdocCrc32.Compute(ReadOnlySpan<byte>.Empty));
+            Assert.Equal(0xCBF43926u, GdocCrc32.Compute("123456789"u8));
+        }
+
+        [Fact]
+        public void BinaryGdocReader_Disposed_ThrowsObjectDisposedExceptionOnAllMembers()
+        {
+            var root = new DocNode { Type = NodeType.Root, Content = "Root" };
+            root.Metadata["k"] = "v";
+            string gdocPath = Path.Combine(_tempDir, "disposed_bin.gdoc");
+            GdocWriter.Write(root, gdocPath);
+
+            var reader = new GdocReader(gdocPath);
+            Assert.Equal(1u, reader.NodeCount);
+            reader.Dispose();
+
+            Assert.Throws<ObjectDisposedException>(() => _ = reader.NodeCount);
+            Assert.Throws<ObjectDisposedException>(() => _ = reader.MetadataCount);
+            Assert.Throws<ObjectDisposedException>(() => _ = reader.GetChildIndices(0));
+            Assert.Throws<ObjectDisposedException>(() => _ = reader.GetNode(0));
+            Assert.Throws<ObjectDisposedException>(() => _ = reader.GetContentUtf8(0));
+            Assert.Throws<ObjectDisposedException>(() => _ = reader.GetContentString(0));
+            Assert.Throws<ObjectDisposedException>(() => _ = reader.GetMetadata(0));
+            Assert.Throws<ObjectDisposedException>(() => _ = reader.ToDocNodeTree());
+        }
     }
 }

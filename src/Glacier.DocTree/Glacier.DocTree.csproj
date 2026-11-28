@@ -23,16 +23,21 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Glacier.DocTree.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
-  <ItemGroup Condition="Exists('../../../Glacier.Polaris/src/Glacier.Polaris/Glacier.Polaris.csproj') and '$(UseLocalProjectReferences)' != 'false'">
-    <ProjectReference Include="../../../Glacier.Polaris/src/Glacier.Polaris/Glacier.Polaris.csproj" />
-    <ProjectReference Include="../../../Glacier.Graph/src/Glacier.Graph/Glacier.Graph.csproj" />
-  </ItemGroup>
-  <ItemGroup Condition="!Exists('../../../Glacier.Polaris/src/Glacier.Polaris/Glacier.Polaris.csproj') or '$(UseLocalProjectReferences)' == 'false'">
-    <PackageReference Include="Glacier.Polaris" Version="1.2.6" />
-    <PackageReference Include="Glacier.Graph" Version="1.2.1" />
+  <ItemGroup>
+    <ProjectReference Include="../../../Glacier.Polaris/src/Glacier.Polaris/Glacier.Polaris.csproj" Condition="Exists('../../../Glacier.Polaris/src/Glacier.Polaris/Glacier.Polaris.csproj') and '$(UseLocalProjectReferences)' != 'false'" />
+    <PackageReference Include="Glacier.Polaris" Condition="!Exists('../../../Glacier.Polaris/src/Glacier.Polaris/Glacier.Polaris.csproj') or '$(UseLocalProjectReferences)' == 'false'" />
+
+    <ProjectReference Include="../../../Glacier.Graph/src/Glacier.Graph/Glacier.Graph.csproj" Condition="Exists('../../../Glacier.Graph/src/Glacier.Graph/Glacier.Graph.csproj') and '$(UseLocalProjectReferences)' != 'false'" />
+    <PackageReference Include="Glacier.Graph" Condition="!Exists('../../../Glacier.Graph/src/Glacier.Graph/Glacier.Graph.csproj') or '$(UseLocalProjectReferences)' == 'false'" />
+
+    <PackageReference Include="System.IO.Hashing" />
   </ItemGroup>
 
 </Project>

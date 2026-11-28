@@ -38,24 +38,42 @@ namespace Glacier.DocTree.Core
         }
 
         /// <summary>
-        /// Recursively gathers all text under this node. 
-        /// Perfect for feeding a highly specific context bundle to an LLM.
+        /// Iteratively gathers all text under this node in pre-order depth-first traversal.
         /// </summary>
         public string GetFullText()
         {
             var sb = new StringBuilder();
-            sb.AppendLine(Content);
-            foreach (var child in Children)
+            using var stack = new ValueDocNodeStack<DocNode>();
+            HashSet<DocNode>? visited = null;
+            int iterations = 0;
+
+            stack.Push(this);
+            while (stack.Count > 0)
             {
-                sb.AppendLine(child.GetFullText());
+                var current = stack.Pop();
+                if (++iterations > 1024)
+                {
+                    visited ??= new HashSet<DocNode>(ReferenceEqualityComparer.Instance);
+                    if (!visited.Add(current))
+                    {
+                        continue;
+                    }
+                }
+
+                sb.AppendLine(current.Content);
+                var children = current.Children;
+                for (int i = children.Count - 1; i >= 0; i--)
+                {
+                    stack.Push(children[i]);
+                }
             }
+
             return sb.ToString().Trim();
         }
     }
 
     /// <summary>
-    /// A blazing fast, zero-dependency Markdown parser that builds a semantic hierarchy 
-    /// instead of just flat HTML or dumb chunks.
+    /// Span-tokenized Markdown parser that builds a semantic <see cref="DocNode"/> hierarchy.
     /// </summary>
     public class MarkdownTreeParser
     {

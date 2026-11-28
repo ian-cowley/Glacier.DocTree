@@ -145,4 +145,98 @@ public class AdversarialStressTests : IDisposable
             Assert.Equal($"Paragraph for {i}", sec.Children[0].Content);
         }
     }
+
+    [Fact]
+    public void IterativeTraversals_DeepTree15000Levels_NoStackOverflow()
+    {
+        const int depth = 15_000;
+        var root = new DocNode { Type = NodeType.Root, Content = "DeepRoot" };
+        var current = root;
+        for (int i = 1; i <= depth; i++)
+        {
+            var child = new DocNode
+            {
+                Type = i == depth ? NodeType.Paragraph : NodeType.Header2,
+                Content = i == depth ? "TargetLeafKeyword" : $"Section_{i}"
+            };
+            current.AddChild(child);
+            current = child;
+        }
+
+        // 1. DocNode.GetFullText()
+        string fullText = root.GetFullText();
+        Assert.Contains("TargetLeafKeyword", fullText);
+
+        // 2. TreeSearch (FindHeader, FindContainingText, GetSemanticPath)
+        var search = new Glacier.DocTree.Traversal.TreeSearch(root);
+        var foundHeader = search.FindHeader($"Section_{depth - 1}");
+        Assert.NotNull(foundHeader);
+        var leafMatches = search.FindContainingText("TargetLeafKeyword");
+        Assert.Single(leafMatches);
+        string semPath = Glacier.DocTree.Traversal.TreeSearch.GetSemanticPath(leafMatches[0]);
+        Assert.Contains($"Section_{depth - 1}", semPath);
+
+        // 3. Binary GdocWriter / GdocReader
+        string gdocPath = GetTempGdocPath();
+        GdocWriter.Write(root, gdocPath);
+        using (var binReader = new GdocReader(gdocPath))
+        {
+            Assert.Equal((uint)(depth + 1), binReader.NodeCount);
+            var restored = binReader.ToDocNodeTree();
+            Assert.Equal(NodeType.Root, restored.Type);
+        }
+
+        // 4. GlacierStorageDocExtensions.ToGdocBytes / LoadGdoc
+        byte[] gdocBytes = root.ToGdocBytes();
+        var loaded = GlacierStorageDocExtensions.LoadGdoc(gdocBytes);
+        Assert.Equal("DeepRoot", loaded.Content);
+
+        // 5. GraphContextDecoupler.ExtractDocumentGraph
+        var graph = Glacier.DocTree.Context.GraphContextDecoupler.ExtractDocumentGraph(root);
+        Assert.Equal(depth + 1, graph.NodeCount);
+        Assert.Equal(depth, graph.EdgeCount);
+
+        // 6. TreeSerializer.Serialize (run on a constrained 256 KB stack thread at 3,000 levels to prove non-recursion)
+        var deepJsonRoot = new DocNode { Type = NodeType.Root, Content = "JsonDeepRoot" };
+        var curJson = deepJsonRoot;
+        for (int i = 1; i <= 3_000; i++)
+        {
+            var c = new DocNode { Type = NodeType.Header2, Content = $"J_{i}" };
+            curJson.AddChild(c);
+            curJson = c;
+        }
+        string jsonDir = Path.Combine(Path.GetTempPath(), $"glacier_deep_json_{Guid.NewGuid():N}");
+        try
+        {
+            Exception? threadEx = null;
+            var t = new System.Threading.Thread(() =>
+            {
+                try { TreeSerializer.Serialize(deepJsonRoot, jsonDir); }
+                catch (Exception ex) { threadEx = ex; }
+            }, maxStackSize: 256 * 1024);
+            t.Start();
+            t.Join();
+            Assert.Null(threadEx);
+            var lazy = TreeSerializer.DeserializeLazy(jsonDir);
+            Assert.Equal("JsonDeepRoot", lazy.Content);
+        }
+        finally
+        {
+            if (Directory.Exists(jsonDir))
+            {
+                try { Directory.Delete(jsonDir, true); } catch { }
+            }
+        }
+    }
+
+    [Fact]
+    public void TreeSearch_GetSemanticPath_CycleThrowsInvalidOperationException()
+    {
+        var a = new DocNode { Type = NodeType.Header1, Content = "A" };
+        var b = new DocNode { Type = NodeType.Header2, Content = "B" };
+        a.AddChild(b);
+        a.Parent = b; // Introduce parent cycle
+
+        Assert.Throws<InvalidOperationException>(() => Glacier.DocTree.Traversal.TreeSearch.GetSemanticPath(b));
+    }
 }

@@ -1,38 +1,35 @@
 using System;
+using System.IO.Hashing;
 
 namespace Glacier.DocTree.Binary
 {
+    /// <summary>
+    /// Hardware-accelerated IEEE 802.3 CRC-32 helper backed by <see cref="Crc32"/>.
+    /// </summary>
     internal static class GdocCrc32
     {
-        private static readonly uint[] Table = GenerateTable();
+        public static uint Compute(ReadOnlySpan<byte> data) => Crc32.HashToUInt32(data);
 
-        private static uint[] GenerateTable()
+        public static unsafe uint ComputeLarge(byte* ptr, long length)
         {
-            var table = new uint[256];
-            for (uint i = 0; i < 256; i++)
+            if (length <= 0) return 0;
+            if (length <= int.MaxValue)
             {
-                uint entry = i;
-                for (int j = 0; j < 8; j++)
-                {
-                    if ((entry & 1) == 1)
-                        entry = (entry >> 1) ^ 0xEDB88320u;
-                    else
-                        entry >>= 1;
-                }
-                table[i] = entry;
+                return Crc32.HashToUInt32(new ReadOnlySpan<byte>(ptr, (int)length));
             }
-            return table;
-        }
 
-        public static uint Compute(ReadOnlySpan<byte> data)
-        {
-            uint crc = 0xFFFFFFFFu;
-            for (int i = 0; i < data.Length; i++)
+            var crc = new Crc32();
+            long remaining = length;
+            byte* current = ptr;
+            const int chunkSize = 1 << 26; // 64 MiB chunks
+            while (remaining > 0)
             {
-                byte index = (byte)((crc & 0xFF) ^ data[i]);
-                crc = (crc >> 8) ^ Table[index];
+                int slice = (int)Math.Min(remaining, chunkSize);
+                crc.Append(new ReadOnlySpan<byte>(current, slice));
+                current += slice;
+                remaining -= slice;
             }
-            return ~crc;
+            return crc.GetCurrentHashAsUInt32();
         }
     }
 }

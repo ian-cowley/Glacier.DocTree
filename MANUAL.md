@@ -1,6 +1,6 @@
 # Glacier.DocTree Manual
 
-Glacier.DocTree is a blazing fast, zero-dependency Markdown parser and semantic document tree library for C# .NET 10. It is designed to construct hierarchical document structures, execute precise contextual search, and support low-memory operations via lazy-loading and serialization.
+Glacier.DocTree is a high-performance Markdown parser, structural chunker, and semantic document tree library for C# .NET 10 (built with `Glacier.Polaris`, `Glacier.Graph`, and `System.IO.Hashing`). It constructs hierarchical document structures, executes iterative contextual search, decouples tables/graphs into columnar and CSR memory, and supports lazy-loading JSON and zero-copy memory-mapped `.gdoc` v2 binary persistence.
 
 ---
 
@@ -11,6 +11,7 @@ Unlike flat text parsers or HTML converters, Glacier.DocTree parses Markdown int
 ### A. NodeType Enum
 - **Structural Nodes**: `Root`, `Header1` to `Header6`.
 - **Content Nodes**: `Paragraph`, `CodeBlock`, `List`.
+*(Pipe-delimited Markdown tables are decoupled via `ColumnarContextDecoupler.DecoupleMarkdownTable`, and inline links are extracted via `GraphContextDecoupler.ExtractDocumentGraph`.)*
 
 ### B. DocNode Representation
 Every node in the tree inherits from `DocNode`:
@@ -19,13 +20,13 @@ Every node in the tree inherits from `DocNode`:
 - `Dictionary<string, string> Metadata { get; set; }`
 - `DocNode? Parent { get; set; }`
 - `List<DocNode> Children { get; set; }`
-- `string GetFullText()`: Recursively gathers all text under this node.
+- `string GetFullText()`: Iteratively gathers all text under this node.
 
 ---
 
-## 2. Parsing Markdown (`MarkdownTreeParser`)
+## 2. Parsing Markdown (`MarkdownTreeParser` / `SpanMarkdownParser`)
 
-Use the parser to convert markdown strings directly into a hierarchical tree.
+Use the parser to convert Markdown strings or `ReadOnlySpan<char>` directly into a hierarchical tree.
 
 ```csharp
 using Glacier.DocTree.Core;
@@ -44,13 +45,14 @@ var root = parser.Parse(markdown);
 
 ---
 
-## 3. Serialization & Lazy Loading (`TreeSerializer`)
+## 3. Serialization & Lazy Loading (`TreeSerializer` & `.gdoc` v2)
 
-To optimize memory usage when working with large documentation corpuses, you can serialize the tree structures to disk and load them on demand.
+To optimize memory usage when working with large documentation corpuses, you can serialize the tree structures to disk and load them on demand or via memory-mapped `.gdoc` v2 binaries.
 
 ### A. TreeSerializer
-- **`Serialize(DocNode root, string directoryPath)`**: Traverses the document tree and serializes each node individually to its own JSON file inside `directoryPath`.
-- **`DeserializeLazy(string directoryPath)`**: Loads only the root metadata and returns a lazy proxy node.
+- **`Serialize(DocNode root, string directoryPath)`**: Iteratively traverses the document tree and serializes each node to its own JSON file inside `directoryPath` (atomically replacing `root.json` and cleaning up only stale child JSON files from the previous tree, leaving unrelated `*.json` files intact).
+- **`DeserializeLazy(string directoryPath)`**: Loads only the root proxy node (`LazyDocNode`); child subtrees load on demand when accessed.
+- **`SerializeBinary(DocNode root, string filePath)` / `OpenBinary(string filePath)` / `DeserializeBinary(string filePath)`**: Writes and memory-maps unified `.gdoc` v2 binary files (`0x434F4447`, 48-byte AST nodes, native `GdocMetadataEntry` metadata table, IEEE 802.3 CRC-32 checksum).
 
 ### B. LazyDocNode
 A proxy subclass of `DocNode` that overrides the base properties. Sub-nodes (children and properties) are loaded dynamically on demand only when they are accessed.
@@ -85,8 +87,8 @@ if (section != null)
 
 ## 4. Traversal and LLM Context Extraction (`TreeSearch`)
 
-`TreeSearch` provides capabilities to locate relevant documentation segments and prepare formatted text bundles optimized for LLMs:
-- **`FindHeader(headerText)`**: Searches the hierarchy to locate a header node.
-- **`FindContainingText(keyword)`**: Scans content nodes (Paragraphs, Lists, CodeBlocks) for a specific keyword.
-- **`GetSemanticPath(DocNode node)`**: Returns the path from root to the node (e.g. `Root > API > Authentication > OAuth2`).
-- **`GetLlmContextBundle(headerText)`**: Produces a structured Markdown string containing the node's full text, path, and boundaries, ideal for inclusion in an LLM system prompt.
+`TreeSearch` provides iterative traversals to locate relevant documentation segments and prepare formatted text bundles optimized for LLMs:
+- **`FindHeader(headerText)`**: Iteratively searches the hierarchy to locate a header node.
+- **`FindContainingText(keyword)`**: Iteratively scans content nodes (Paragraphs, Lists, CodeBlocks) for a specific keyword.
+- **`GetSemanticPath(DocNode node)`**: Walks upward (with cycle detection) from `node` to return the breadcrumb path (e.g. `Document Root > API > Authentication > OAuth2`).
+- **`GetLlmContextBundle(headerText)`**: Produces a structured bundle containing the node's semantic path and iteratively gathered text.

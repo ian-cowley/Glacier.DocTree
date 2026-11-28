@@ -29,68 +29,121 @@ public static class GraphContextDecoupler
 
     /// <summary>
     /// Extracts structural hierarchy edges (<c>CONTAINS</c>) and inline Markdown/wikilink cross-references
-    /// (<c>LINKS_TO</c>) directly from a <see cref="DocNode"/> AST into a <see cref="GraphStore"/>.
+    /// (<c>LINKS_TO</c>) directly from a <see cref="DocNode"/> AST into a <see cref="GraphStore"/> using iterative traversal.
     /// </summary>
     public static GraphStore ExtractDocumentGraph(DocNode root, GraphStore? targetStore = null)
     {
         ArgumentNullException.ThrowIfNull(root);
         var store = targetStore ?? CreateGraphStore();
         var slugToNodeId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        int counter = 0;
 
-        IndexHeadersRecursive(root, slugToNodeId, ref counter);
-        counter = 0;
-        PopulateEdgesRecursive(root, parentId: null, store, slugToNodeId, ref counter);
+        IndexHeadersIterative(root, slugToNodeId);
+        PopulateEdgesIterative(root, store, slugToNodeId);
         return store;
     }
 
-    private static void IndexHeadersRecursive(DocNode node, Dictionary<string, string> slugToNodeId, ref int counter)
+    private static void IndexHeadersIterative(DocNode root, Dictionary<string, string> slugToNodeId)
     {
-        string nodeId = BuildNodeKey(node, counter++);
-        if (node.Type is >= NodeType.Header1 and <= NodeType.Header6 && !string.IsNullOrWhiteSpace(node.Content))
-        {
-            string slug = Slugify(node.Content);
-            if (!string.IsNullOrEmpty(slug))
-            {
-                slugToNodeId.TryAdd(slug, nodeId);
-            }
-            slugToNodeId.TryAdd(node.Content.Trim(), nodeId);
-        }
+        var slugCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        using var stack = new ValueDocNodeStack<(DocNode Node, string? ParentKey, int ParentIndex, int Depth, ulong ParentPathHash, string? LastHeaderSlug, string? BoundedSlugPath, int HeaderDepth)>();
+        stack.Push((root, null, -1, 0, FnvOffsetBasis64, null, null, 0));
 
-        for (int i = 0; i < node.Children.Count; i++)
+        int counter = 0;
+        while (stack.Count > 0)
         {
-            IndexHeadersRecursive(node.Children[i], slugToNodeId, ref counter);
+            var (node, parentKey, parentIndex, depth, parentPathHash, lastHeaderSlug, boundedSlugPath, headerDepth) = stack.Pop();
+            int nodeIndex = counter++;
+            string nodeId = BuildNodeKey(node, nodeIndex, parentKey, parentIndex, depth, parentPathHash, out ulong nodePathHash);
+            string? nextLastHeaderSlug = lastHeaderSlug;
+            string? nextBoundedSlugPath = boundedSlugPath;
+            int nextHeaderDepth = headerDepth;
+
+            if (node.Type is >= NodeType.Header1 and <= NodeType.Header6 && !string.IsNullOrWhiteSpace(node.Content))
+            {
+                string trimmed = node.Content.Trim();
+                string slug = Slugify(trimmed);
+                if (!string.IsNullOrEmpty(slug))
+                {
+                    slugToNodeId.TryAdd(slug, nodeId);
+
+                    if (!string.IsNullOrEmpty(lastHeaderSlug))
+                    {
+                        slugToNodeId.TryAdd($"{lastHeaderSlug}/{slug}", nodeId);
+                    }
+
+                    if (headerDepth == 0 && string.IsNullOrEmpty(boundedSlugPath))
+                    {
+                        nextBoundedSlugPath = slug.Length <= 256 ? slug : null;
+                    }
+                    else if (!string.IsNullOrEmpty(boundedSlugPath) &&
+                             headerDepth < 8 &&
+                             boundedSlugPath.Length + 1 + slug.Length <= 256)
+                    {
+                        string pathSlug = $"{boundedSlugPath}/{slug}";
+                        slugToNodeId.TryAdd(pathSlug, nodeId);
+                        nextBoundedSlugPath = pathSlug;
+                    }
+                    else
+                    {
+                        nextBoundedSlugPath = null;
+                    }
+
+                    nextLastHeaderSlug = slug;
+                    nextHeaderDepth = headerDepth + 1;
+
+                    if (slugCounts.TryGetValue(slug, out int seen))
+                    {
+                        slugToNodeId.TryAdd($"{slug}-{seen}", nodeId);
+                        slugCounts[slug] = seen + 1;
+                    }
+                    else
+                    {
+                        slugCounts[slug] = 1;
+                    }
+                }
+
+                slugToNodeId.TryAdd(trimmed, nodeId);
+            }
+
+            var children = node.Children;
+            for (int i = children.Count - 1; i >= 0; i--)
+            {
+                stack.Push((children[i], nodeId, nodeIndex, depth + 1, nodePathHash, nextLastHeaderSlug, nextBoundedSlugPath, nextHeaderDepth));
+            }
         }
     }
 
-    private static void PopulateEdgesRecursive(
-        DocNode node,
-        string? parentId,
+    private static void PopulateEdgesIterative(
+        DocNode root,
         GraphStore store,
-        Dictionary<string, string> slugToNodeId,
-        ref int counter)
+        Dictionary<string, string> slugToNodeId)
     {
-        string nodeId = BuildNodeKey(node, counter++);
-        store.AddNode(nodeId);
+        using var stack = new ValueDocNodeStack<(DocNode Node, string? ParentKey, int ParentIndex, int Depth, ulong ParentPathHash)>();
+        stack.Push((root, null, -1, 0, FnvOffsetBasis64));
 
-        if (parentId != null)
+        int counter = 0;
+        while (stack.Count > 0)
         {
-            store.AddEdge(parentId, nodeId, "CONTAINS", 1.0f);
-        }
+            var (node, parentKey, parentIndex, depth, parentPathHash) = stack.Pop();
+            int nodeIndex = counter++;
+            string nodeId = BuildNodeKey(node, nodeIndex, parentKey, parentIndex, depth, parentPathHash, out ulong nodePathHash);
+            store.AddNode(nodeId);
 
-        if (!string.IsNullOrEmpty(node.Content) && node.Type != NodeType.CodeBlock)
-        {
-            ExtractInlineLinks(node.Content.AsSpan(), nodeId, store, slugToNodeId);
-        }
+            if (parentKey != null)
+            {
+                store.AddEdge(parentKey, nodeId, "CONTAINS", 1.0f);
+            }
 
-        string nextSectionOwner = node.Type is NodeType.Root or (>= NodeType.Header1 and <= NodeType.Header6)
-            ? nodeId
-            : (parentId ?? nodeId);
+            if (!string.IsNullOrEmpty(node.Content) && node.Type != NodeType.CodeBlock)
+            {
+                ExtractInlineLinks(node.Content.AsSpan(), nodeId, store, slugToNodeId);
+            }
 
-        for (int i = 0; i < node.Children.Count; i++)
-        {
-            PopulateEdgesRecursive(node.Children[i], nodeId, store, slugToNodeId, ref counter);
-            _ = nextSectionOwner;
+            var children = node.Children;
+            for (int i = children.Count - 1; i >= 0; i--)
+            {
+                stack.Push((children[i], nodeId, nodeIndex, depth + 1, nodePathHash));
+            }
         }
     }
 
@@ -110,7 +163,7 @@ public static class GraphContextDecoupler
                 if (close > 0)
                 {
                     string rawTarget = text.Slice(i + 2, close).Trim().ToString();
-                    string resolved = slugToNodeId.TryGetValue(rawTarget, out var mapped) ? mapped : rawTarget;
+                    string resolved = ResolveLinkTarget(rawTarget, slugToNodeId);
                     store.AddEdge(sourceNodeId, resolved, "LINKS_TO", 1.0f);
                     i += close + 4;
                     continue;
@@ -131,9 +184,9 @@ public static class GraphContextDecoupler
                         {
                             var rawSpan = text.Slice(openParenIdx + 1, closeParen).Trim();
                             string target = rawSpan.StartsWith("#")
-                                ? rawSpan[1..].ToString()
+                                ? rawSpan[1..].Trim().ToString()
                                 : rawSpan.ToString();
-                            string resolved = slugToNodeId.TryGetValue(target, out var mapped) ? mapped : target;
+                            string resolved = ResolveLinkTarget(target, slugToNodeId);
                             store.AddEdge(sourceNodeId, resolved, "LINKS_TO", 1.0f);
                             i = openParenIdx + 1 + closeParen + 1;
                             continue;
@@ -146,14 +199,109 @@ public static class GraphContextDecoupler
         }
     }
 
-    private static string BuildNodeKey(DocNode node, int index)
+    private static string ResolveLinkTarget(string rawTarget, Dictionary<string, string> slugToNodeId)
     {
-        if (node.Type == NodeType.Root) return "Root";
-        if (node.Type is >= NodeType.Header1 and <= NodeType.Header6 && !string.IsNullOrWhiteSpace(node.Content))
+        if (slugToNodeId.TryGetValue(rawTarget, out string? mapped))
         {
-            return $"{node.Type}:{node.Content.Trim()}";
+            return mapped;
         }
-        return $"{node.Type}:{index}";
+
+        if (rawTarget.IndexOf('/') >= 0)
+        {
+            string normalizedPath = NormalizePathSlug(rawTarget.AsSpan());
+            if (!string.IsNullOrEmpty(normalizedPath) && slugToNodeId.TryGetValue(normalizedPath, out mapped))
+            {
+                return mapped;
+            }
+        }
+        else
+        {
+            string normalized = Slugify(rawTarget);
+            if (!string.IsNullOrEmpty(normalized) && slugToNodeId.TryGetValue(normalized, out mapped))
+            {
+                return mapped;
+            }
+        }
+
+        return rawTarget;
+    }
+
+    private static string NormalizePathSlug(ReadOnlySpan<char> path)
+    {
+        if (path.IsEmpty) return string.Empty;
+
+        var sb = new System.Text.StringBuilder(path.Length);
+        while (!path.IsEmpty)
+        {
+            int slash = path.IndexOf('/');
+            ReadOnlySpan<char> segment = slash >= 0 ? path[..slash] : path;
+            string segSlug = Slugify(segment.Trim().ToString());
+            if (!string.IsNullOrEmpty(segSlug))
+            {
+                if (sb.Length > 0)
+                {
+                    sb.Append('/');
+                }
+                sb.Append(segSlug);
+            }
+
+            if (slash < 0)
+            {
+                break;
+            }
+            path = path[(slash + 1)..];
+        }
+        return sb.ToString();
+    }
+
+    private const ulong FnvOffsetBasis64 = 14695981039346656037UL;
+    private const ulong FnvPrime64 = 1099511628211UL;
+
+    private static ulong AdvancePathHash(ulong hash, string segment)
+    {
+        hash ^= (ulong)'/';
+        hash *= FnvPrime64;
+        for (int i = 0; i < segment.Length; i++)
+        {
+            hash ^= segment[i];
+            hash *= FnvPrime64;
+        }
+        return hash;
+    }
+
+    private static string BuildNodeKey(
+        DocNode node,
+        int index,
+        string? parentKey,
+        int parentIndex,
+        int depth,
+        ulong parentPathHash,
+        out ulong nodePathHash)
+    {
+        if (node.Type == NodeType.Root)
+        {
+            string rootKey = index == 0 ? "Root" : $"Root#{index}";
+            nodePathHash = AdvancePathHash(parentPathHash, rootKey);
+            return rootKey;
+        }
+
+        string localKey = node.Type is >= NodeType.Header1 and <= NodeType.Header6 && !string.IsNullOrWhiteSpace(node.Content)
+            ? $"{node.Type}:{node.Content.Trim()}#{index}"
+            : $"{node.Type}#{index}";
+
+        nodePathHash = AdvancePathHash(parentPathHash, localKey);
+
+        if (string.IsNullOrEmpty(parentKey) || string.Equals(parentKey, "Root", StringComparison.Ordinal))
+        {
+            return localKey;
+        }
+
+        if (depth <= 4 && parentKey.Length <= 128)
+        {
+            return $"{parentKey}/{localKey}";
+        }
+
+        return $"{parentPathHash:x16}/@{parentIndex}/{localKey}";
     }
 
     private static string Slugify(string heading)

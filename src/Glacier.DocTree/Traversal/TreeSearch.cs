@@ -18,77 +18,96 @@ namespace Glacier.DocTree.Traversal
         }
 
         /// <summary>
-        /// Finds the first header (H1-H6) that exactly matches or contains the target text.
-        /// Perfect for Agent queries like: "Extract the 'Terms of Service' section".
+        /// Finds the first header (H1-H6) that exactly matches or contains the target text
+        /// using iterative pre-order traversal.
         /// </summary>
         public DocNode? FindHeader(string headerText, StringComparison comparison = StringComparison.OrdinalIgnoreCase)
         {
-            return FindHeaderRecursive(_root, headerText, comparison);
-        }
+            ArgumentNullException.ThrowIfNull(headerText);
 
-        private DocNode? FindHeaderRecursive(DocNode current, string target, StringComparison comparison)
-        {
-            if (current.Type >= NodeType.Header1 && current.Type <= NodeType.Header6)
+            using var stack = new ValueDocNodeStack<DocNode>();
+            stack.Push(_root);
+
+            while (stack.Count > 0)
             {
-                if (current.Content.Contains(target, comparison))
+                var current = stack.Pop();
+                if (current.Type >= NodeType.Header1 && current.Type <= NodeType.Header6)
                 {
-                    return current;
+                    if (current.Content.Contains(headerText, comparison))
+                    {
+                        return current;
+                    }
                 }
-            }
 
-            foreach (var child in current.Children)
-            {
-                var result = FindHeaderRecursive(child, target, comparison);
-                if (result != null) return result;
+                var children = current.Children;
+                for (int i = children.Count - 1; i >= 0; i--)
+                {
+                    stack.Push(children[i]);
+                }
             }
 
             return null;
         }
 
         /// <summary>
-        /// Scans the entire tree for any node (paragraph, list, code block) containing a specific keyword.
+        /// Scans the entire tree iteratively for any node (paragraph, list, code block) containing a specific keyword.
         /// </summary>
         public List<DocNode> FindContainingText(string keyword, StringComparison comparison = StringComparison.OrdinalIgnoreCase)
         {
-            var results = new List<DocNode>();
-            FindContainingTextRecursive(_root, keyword, comparison, results);
-            return results;
-        }
+            ArgumentNullException.ThrowIfNull(keyword);
 
-        private void FindContainingTextRecursive(DocNode current, string keyword, StringComparison comparison, List<DocNode> results)
-        {
-            if (current.Type == NodeType.Paragraph || current.Type == NodeType.List || current.Type == NodeType.CodeBlock)
+            var results = new List<DocNode>();
+            using var stack = new ValueDocNodeStack<DocNode>();
+            stack.Push(_root);
+
+            while (stack.Count > 0)
             {
-                if (current.Content.Contains(keyword, comparison))
+                var current = stack.Pop();
+                if (current.Type == NodeType.Paragraph || current.Type == NodeType.List || current.Type == NodeType.CodeBlock)
                 {
-                    results.Add(current);
+                    if (current.Content.Contains(keyword, comparison))
+                    {
+                        results.Add(current);
+                    }
+                }
+
+                var children = current.Children;
+                for (int i = children.Count - 1; i >= 0; i--)
+                {
+                    stack.Push(children[i]);
                 }
             }
 
-            foreach (var child in current.Children)
-            {
-                FindContainingTextRecursive(child, keyword, comparison, results);
-            }
+            return results;
         }
 
         /// <summary>
         /// Walks UP the tree from a specific node to build its semantic breadcrumb path.
         /// Example output: "Root > API Documentation > Authentication > OAuth2"
-        /// This gives LLMs absolute certainty about the context of the text they are reading.
         /// </summary>
         public static string GetSemanticPath(DocNode target)
         {
+            ArgumentNullException.ThrowIfNull(target);
+
             var path = new List<string>();
             var current = target;
+            var hare = target.Parent;
 
             while (current != null)
             {
-                // For paragraphs, we just want the header hierarchy above them
+                if (ReferenceEquals(current, hare))
+                {
+                    throw new InvalidOperationException("Cycle detected in DocNode parent chain.");
+                }
+
+                // For paragraphs and code blocks, include only the header hierarchy above them
                 if (current.Type != NodeType.Paragraph && current.Type != NodeType.CodeBlock)
                 {
                     path.Add(current.Content);
                 }
+
                 current = current.Parent;
+                hare = hare?.Parent?.Parent;
             }
 
             path.Reverse();
@@ -96,7 +115,7 @@ namespace Glacier.DocTree.Traversal
         }
 
         /// <summary>
-        /// Retrieves a bundled context frame for an LLM. 
+        /// Retrieves a bundled context frame for an LLM.
         /// Finds a target header, gets the breadcrumb path, and extracts all nested text.
         /// </summary>
         public string GetLlmContextBundle(string headerText)
@@ -105,11 +124,11 @@ namespace Glacier.DocTree.Traversal
             if (node == null) return $"[No section found matching '{headerText}']";
 
             var sb = new StringBuilder();
-            sb.AppendLine($"--- SEMANTIC CONTEXT ---");
+            sb.AppendLine("--- SEMANTIC CONTEXT ---");
             sb.AppendLine($"LOCATION: {GetSemanticPath(node)}");
-            sb.AppendLine($"--- BEGIN TEXT ---");
+            sb.AppendLine("--- BEGIN TEXT ---");
             sb.AppendLine(node.GetFullText());
-            sb.AppendLine($"--- END TEXT ---");
+            sb.AppendLine("--- END TEXT ---");
 
             return sb.ToString();
         }

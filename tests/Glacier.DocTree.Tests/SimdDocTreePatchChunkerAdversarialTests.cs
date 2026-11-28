@@ -312,4 +312,87 @@ public class SimdDocTreePatchChunkerAdversarialTests
                 $"Fixture {fixtureKind} patch {i} of length {p.ByteLength} exceeded MaxPatchLength {SimdDocTreePatchChunker.MaxPatchLength}");
         }
     }
+
+    [Fact]
+    public void ChunkUtf8_ShortSegmentFollowedByLongText_FlushesAtPendingDelimiterWithoutCrossing()
+    {
+        string shortHeader = "# Title\n"; // 8 bytes (< MinPatchLength 16)
+        string longBody = new string('x', 90);
+        byte[] input = Encoding.UTF8.GetBytes(shortHeader + longBody);
+
+        var patches = SimdDocTreePatchChunker.ChunkUtf8(input);
+        Assert.True(patches.Length >= 3);
+
+        // First patch must be exactly "# Title\n" (8 bytes, DocHeader), never merged into 'x' body
+        Assert.Equal(0u, patches[0].ByteOffset);
+        Assert.Equal((ushort)shortHeader.Length, patches[0].ByteLength);
+        Assert.Equal(PatchType.DocHeader, patches[0].Type);
+
+        // Verify exact reconstruction
+        int total = 0;
+        foreach (var p in patches)
+        {
+            Assert.Equal((uint)total, p.ByteOffset);
+            Assert.True(p.ByteLength <= SimdDocTreePatchChunker.MaxPatchLength);
+            total += p.ByteLength;
+        }
+        Assert.Equal(input.Length, total);
+    }
+
+    [Fact]
+    public void CountPatches_ZeroHeapAllocationAndMatchesChunkUtf8()
+    {
+        string[] samples =
+        {
+            string.Empty,
+            "a",
+            "# Title\n" + new string('x', 90),
+            "int a = 1;\n" + new string('y', 75) + ";\n",
+            new string(';', 10_000),
+            "public class Foo { private int x; }\n",
+            string.Join("\n", Enumerable.Repeat("# Header\nBody line that exceeds 64 bytes easily without delimiters until newline.", 30))
+        };
+
+        foreach (string s in samples)
+        {
+            byte[] utf8 = Encoding.UTF8.GetBytes(s);
+            var chunked = SimdDocTreePatchChunker.ChunkUtf8(utf8);
+            int counted = SimdDocTreePatchChunker.CountPatches(utf8);
+            Assert.Equal(chunked.Length, counted);
+        }
+
+        byte[] stressInput = Encoding.UTF8.GetBytes("# Title\n" + new string('x', 200) + ";\npublic class Bar { int v = 1; }\n");
+        SimdDocTreePatchChunker.CountPatches(stressInput); // Warm up JIT
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1000; i++)
+        {
+            int count = SimdDocTreePatchChunker.CountPatches(stressInput);
+            Assert.True(count > 0);
+        }
+        long after = GC.GetAllocatedBytesForCurrentThread();
+        Assert.Equal(0, after - before);
+    }
+
+    [Theory]
+    [InlineData("publication notes\n", PatchType.Statement)]
+    [InlineData("privately owned!\n", PatchType.Statement)]
+    [InlineData("internalize logs\n", PatchType.Statement)]
+    [InlineData("classification!!\n", PatchType.Statement)]
+    [InlineData("structure fields\n", PatchType.Statement)]
+    [InlineData("functional calls\n", PatchType.Statement)]
+    [InlineData("default values!!\n", PatchType.Statement)]
+    [InlineData("definition sets!\n", PatchType.Statement)]
+    [InlineData("public class Foo\n", PatchType.Declaration)]
+    [InlineData("private int bar!\n", PatchType.Declaration)]
+    [InlineData("internal struct S\n", PatchType.Declaration)]
+    [InlineData("def compute_sum()\n", PatchType.Declaration)]
+    [InlineData("func run_kernel()\n", PatchType.Declaration)]
+    public void ChunkUtf8_StartsWithKeyword_EnforcesIdentifierWordBoundaries(string text, PatchType expectedType)
+    {
+        byte[] utf8 = Encoding.UTF8.GetBytes(text);
+        var patches = SimdDocTreePatchChunker.ChunkUtf8(utf8);
+        var patch = Assert.Single(patches);
+        Assert.Equal(expectedType, patch.Type);
+    }
 }
