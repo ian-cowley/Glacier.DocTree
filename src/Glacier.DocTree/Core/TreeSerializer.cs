@@ -134,7 +134,11 @@ namespace Glacier.DocTree.Core
             {
                 if (File.Exists(tmpPath))
                 {
-                    try { File.Delete(tmpPath); } catch { }
+                    try { File.Delete(tmpPath); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        System.Diagnostics.Trace.TraceWarning($"[TreeSerializer] Failed to clean temp file '{tmpPath}': {ex.Message}");
+                    }
                 }
             }
         }
